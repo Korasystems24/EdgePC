@@ -1,0 +1,15 @@
+[project]
+name = "edgepc"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "loguru>=0.7.3",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.2",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "requests>=2.34.2",
+    "zeep>=4.3.3",
+]
