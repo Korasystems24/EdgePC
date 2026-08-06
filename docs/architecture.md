@@ -17,10 +17,10 @@ Edge-устройство опрашивает радар (LIMACO WCF), **каж
 ## 2. Как читать этот документ (маршрут входа)
 
 1. Прочитать документ сверху вниз, держа открытой схему из раздела 4.
-2. Пройти по коду путь одного пакета: `bootstrap._build_worker_manager` → `IngestionWorker.start` → `IngestionService.collect_once` → `WCFRadarAdapter.read_packet` → `SqlAlchemyTelemetryRepository.save`. Полчаса — и 80% идей покрыто.
+2. Открыть код и проследить путь одного пакета от старта до записи в БД: `bootstrap._build_worker_manager` → `IngestionWorker.start` → `IngestionService.collect_once` → `WCFRadarAdapter.read_packet` → `SqlAlchemyTelemetryRepository.save`. Это займёт около получаса и покажет на живом коде большинство идей документа: слои, порты, доменные ошибки.
 3. Посмотреть `src/domain/exceptions.py` — докстринги объясняют семантику каждой ошибки.
 4. Реализовать TODO (раздел 10) по порядку: шаги 1–4 механические, шаг 5 — где живёт суть. Если шаг 5 понятен — архитектура понята.
-5. Самопроверка слоёв в любой момент: `rg "^from src" src/domain src/application` — в выводе не должно быть `infrastructure`.
+5. После любого рефакторинга проверять правило слоёв «domain и application не импортируют infrastructure» одной командой: `rg "^from src" src/domain src/application` выводит все импорты внутри этих слоёв; если в выводе встретилось `infrastructure` — правило нарушено, зависимость надо развернуть через порт.
 
 ### Мини-словарь (термины, которые дальше используются без пояснений)
 
