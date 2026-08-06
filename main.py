@@ -1,25 +1,11 @@
 import asyncio
 
 from src.config.settings import settings
+from src.logging_config import configure_logging
 
 
 async def main() -> None:
-
-    import sys
-
-    from loguru import logger
-
-    logger.remove()
-
-    logger.add(sys.stderr, level=("DEBUG" if settings.debug else "INFO"))
-    logger.add(
-        "prod.log",
-        level="INFO",
-        rotation="10 MB",
-        retention="1 month",
-        compression="gz",
-    )
-
+    configure_logging()
     if settings.debug:
         from src.entrypoints.wcf_debug import run
     else:

@@ -3,7 +3,6 @@ import random
 from datetime import UTC, datetime
 
 from src.domain.entities.telemetry_packet import TelemetryPacket
-from src.domain.exeption import InvalidTelemetryPacketError
 from src.domain.ports.radar_adapter import RadarAdapter
 from src.domain.value_objects.beam import Beam
 
@@ -18,8 +17,7 @@ class MockRadarAdapter(RadarAdapter):
         await asyncio.sleep(self.delay)
 
         if random.random() <= self.fail:
-            raise InvalidTelemetryPacketError()
-
+            raise ValueError()
         ts = datetime.now(tz=UTC).timestamp()
 
         beams = [
