@@ -8,6 +8,7 @@ from src.domain.exceptions import (
     RadarDataInvalid,
     RadarSourceMisconfigured,
     RadarSourceUnavailable,
+    TelemetryStorageError,
 )
 
 
@@ -64,12 +65,22 @@ class IngestionWorker:
                 e,
             )
         except RadarSourceMisconfigured as e:
+            # Ретраи бессмысленны — конфигурацию должен поправить человек.
+            logger.bind(worker=self.name).critical(
+                "Требуется вмешательство в конфигурацию, остановка воркера: {}", e
+            )
+            self._fatal_error = e
+            self._running = False
+        except TelemetryStorageError as e:
             self._consecutive_failures += 1
             logger.bind(worker=self.name).error(
-                "Требуется вмешательство в конфигурацию: {}", e
+                "Пакет собран, но не сохранён ({}/{}): {}",
+                self._consecutive_failures,
+                self._max_consecutive_failures,
+                e,
             )
         except RadarDataInvalid as e:
-            # это не критично по своей природе — данные плохие, но источник жив, не считаем как failure
+            # это не критично по своей природе - данные плохие, но источник жив, не считаем как failure
             logger.bind(worker=self.name).warning(
                 "Некорректные данные, пропуск тика: {}", e
             )

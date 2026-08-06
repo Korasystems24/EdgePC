@@ -40,6 +40,8 @@ class WCFRadarAdapter(RadarAdapter):
             raw_data = await asyncio.to_thread(self._client.get_data)
             tank_data = WCFDataDTO.from_raw(raw_data)
 
+            return self._mapper.to_entity(vessel, tank_data)
+
         except ClientNotInitialized as e:
             raise src.domain.exceptions.RadarSourceUnavailable(str(e)) from e
         except (RequestException, ZeepError) as e:
@@ -52,5 +54,3 @@ class WCFRadarAdapter(RadarAdapter):
             raise src.domain.exceptions.RadarDataInvalid(
                 f"Некорректные данные от WCF: {e}"
             ) from e
-
-        return self._mapper.to_entity(vessel, tank_data)

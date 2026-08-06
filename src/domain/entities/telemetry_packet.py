@@ -1,19 +1,15 @@
-from typing import Annotated
-
 import pydantic
 
 from src.domain.enum import SourceState
-from src.domain.value_objects.beam import Beam
-
-TelemetryBeams = Annotated[list[Beam], pydantic.Field(min_length=64, max_length=64)]
-
-type Timestamp = pydantic.AwareDatetime
+from src.domain.value_objects.types import Measurement, TelemetryBeams, Timestamp
 
 
 class TelemetryPacket(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(frozen=True)
+
     ts: Timestamp
-    avg_level: float | None = None
-    mass: float | None = None
-    volume: float | None = None
+    avg_level: Measurement | None = None
+    mass: Measurement | None = None
+    volume: Measurement | None = None
     beams: TelemetryBeams
     source_state: SourceState
