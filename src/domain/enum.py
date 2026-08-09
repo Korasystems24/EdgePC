@@ -7,10 +7,17 @@ class RadarSourceType(StrEnum):
     WCF = "wcf"
 
 
-class SourceState(StrEnum):
-    HEALTHY = "HEALTHY"
-    WCF_DOWN = "WCF_DOWN"
-    WCF_RECOVERED = "WCF_RECOVERED"
+class NetworkGatewayType(StrEnum):
+    MOCK = "mock"
+    HTTP = "http"
+
+
+class EdgeEventType(StrEnum):
+    RADAR_DOWN = "radar_down"
+    RADAR_RECOVERED = "radar_recovered"
+    PACKET_QUARANTINED = "packet_quarantined"
+    WORKER_RESTARTED = "worker_restarted"
+    FATAL_ERROR = "fatal_error"
 
 
 class BeamStatus(StrEnum):

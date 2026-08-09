@@ -38,5 +38,4 @@ class MockRadarAdapter(RadarAdapter):
             mass=mass,
             avg_level=avg_level,
             beams=beams,
-            source_state="HEALTHY",
         )

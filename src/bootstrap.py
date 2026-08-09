@@ -2,6 +2,8 @@ import asyncio
 
 from loguru import logger
 
+from src.application.dispatch.service import DispatchService
+from src.application.dispatch.worker import DispatchWorker
 from src.application.ingestion.service import IngestionService
 from src.application.ingestion.worker import IngestionWorker
 from src.application.worker_manager import WorkerManager
@@ -11,6 +13,7 @@ from src.infrastructure.database.repositories.telemetry_repository import (
     SqlAlchemyTelemetryRepository,
 )
 from src.infrastructure.database.sqlite_client import SqliteClient
+from src.infrastructure.network.factory import create_network_gateway
 from src.infrastructure.radar.factory import create_radar_adapter
 
 
@@ -20,6 +23,8 @@ def _build_worker_manager(
     """Сборка графа зависимостей. Новые сервисы и воркеры добавляются здесь."""
     radar_adapter = create_radar_adapter(app_settings)
     telemetry_repository = SqlAlchemyTelemetryRepository(db_client)
+    gateway = create_network_gateway(app_settings)
+
     ingestion_service = IngestionService(
         radar_adapter=radar_adapter,
         repository=telemetry_repository,
@@ -29,7 +34,19 @@ def _build_worker_manager(
         service=ingestion_service,
         interval=app_settings.wcf.ingestion_interval,
     )
-    return WorkerManager(workers=[ingestion_worker])
+
+    dispatch_service = DispatchService(
+        repository=telemetry_repository,
+        gateway=gateway,
+        batch_size=app_settings.dispatch.batch_size,
+    )
+    dispatch_worker = DispatchWorker(
+        name="dispatch",
+        service=dispatch_service,
+        settings=app_settings.dispatch,
+    )
+
+    return WorkerManager(workers=[ingestion_worker, dispatch_worker])
 
 
 async def _run(manager: WorkerManager) -> None:

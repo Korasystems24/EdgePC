@@ -14,34 +14,42 @@ from src.infrastructure.radar.wcf.exceptions import (
     ValueRadarError,
 )
 from src.infrastructure.radar.wcf.mapping.vessel_mapper import RadarMapper
+from src.infrastructure.radar.wcf.selector import WCFResourceSelector
 from src.infrastructure.radar.wcf.wcf_client import WCFClient
 
 
 class WCFRadarAdapter(RadarAdapter):
-    def __init__(
-        self,
-        client: WCFClient,
-        mapper: RadarMapper,
-        park_name: str,
-        vessel_name: str,
-    ) -> None:
+    def __init__(self, client: WCFClient, mapper: RadarMapper) -> None:
         self._client = client
         self._mapper = mapper
+        self._park_name: str | None = None
+        self._vessel_name: str | None = None
+
+    def _ensure_ready(self) -> None:
+        if self._park_name is not None and self._vessel_name is not None:
+            return
+
+        self._client.initialize()
+        park_name, vessel_name = WCFResourceSelector(self._client).select()
         self._park_name = park_name
         self._vessel_name = vessel_name
 
+    def _read_packet_sync(self) -> TelemetryPacket:
+        self._ensure_ready()
+        assert self._park_name is not None
+        assert self._vessel_name is not None
+
+        raw_vessel = self._client.get_vessel(self._park_name, self._vessel_name)
+        vessel = WCFVesselDTO.from_zeep(raw_vessel)
+
+        raw_data = self._client.get_data()
+        tank_data = WCFDataDTO.from_raw(raw_data)
+
+        return self._mapper.to_entity(vessel, tank_data)
+
     async def read_packet(self) -> TelemetryPacket:
         try:
-            raw_vessel = await asyncio.to_thread(
-                self._client.get_vessel, self._park_name, self._vessel_name
-            )
-            vessel = WCFVesselDTO.from_zeep(raw_vessel)
-
-            raw_data = await asyncio.to_thread(self._client.get_data)
-            tank_data = WCFDataDTO.from_raw(raw_data)
-
-            return self._mapper.to_entity(vessel, tank_data)
-
+            return await asyncio.to_thread(self._read_packet_sync)
         except ClientNotInitialized as e:
             raise src.domain.exceptions.RadarSourceUnavailable(str(e)) from e
         except (RequestException, ZeepError) as e:

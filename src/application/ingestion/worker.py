@@ -4,6 +4,7 @@ import time
 from loguru import logger
 
 from src.application.ingestion.service import IngestionService
+from src.application.ports.worker import FatalError
 from src.domain.exceptions import (
     RadarDataInvalid,
     RadarSourceMisconfigured,
@@ -27,10 +28,15 @@ class IngestionWorker:
         self._running = False
         self._last_heartbeat: float = 0.0
         self._consecutive_failures = 0
-        self._fatal_error: Exception | None = None
+        self._fatal_error: FatalError | None = None
+
+    @property
+    def fatal_error(self) -> FatalError | None:
+        return self._fatal_error
 
     async def start(self) -> None:
         self._running = True
+        self._fatal_error = None
         logger.bind(worker=self.name).info("Воркер запущен")
 
         while self._running:
@@ -38,13 +44,19 @@ class IngestionWorker:
             await self._safe_tick()
             self._last_heartbeat = time.monotonic()
 
+            if self._fatal_error is not None:
+                break
+
             if self._consecutive_failures >= self._max_consecutive_failures:
                 logger.bind(worker=self.name).critical(
                     "Превышен лимит подряд идущих ошибок ({}), остановка воркера",
                     self._consecutive_failures,
                 )
-                self._fatal_error = RuntimeError(
-                    f"{self.name}: too many consecutive failures"
+                self._fatal_error = FatalError(
+                    reason=(
+                        f"too many consecutive failures ({self._consecutive_failures})"
+                    ),
+                    restartable=False,
                 )
                 self._running = False
                 break
@@ -55,7 +67,7 @@ class IngestionWorker:
     async def _safe_tick(self) -> None:
         try:
             await self._service.collect_once()
-            self._consecutive_failures = 0  # успех — сбрасываем счётчик
+            self._consecutive_failures = 0
         except RadarSourceUnavailable as e:
             self._consecutive_failures += 1
             logger.bind(worker=self.name).warning(
@@ -65,11 +77,13 @@ class IngestionWorker:
                 e,
             )
         except RadarSourceMisconfigured as e:
-            # Ретраи бессмысленны — конфигурацию должен поправить человек.
             logger.bind(worker=self.name).critical(
                 "Требуется вмешательство в конфигурацию, остановка воркера: {}", e
             )
-            self._fatal_error = e
+            self._fatal_error = FatalError(
+                reason=str(e) or "radar source misconfigured",
+                restartable=False,
+            )
             self._running = False
         except TelemetryStorageError as e:
             self._consecutive_failures += 1
@@ -80,13 +94,9 @@ class IngestionWorker:
                 e,
             )
         except RadarDataInvalid as e:
-            # это не критично по своей природе - данные плохие, но источник жив, не считаем как failure
             logger.bind(worker=self.name).warning(
                 "Некорректные данные, пропуск тика: {}", e
             )
-        except Exception:  # noqa: BLE001
-            self._consecutive_failures += 1
-            logger.bind(worker=self.name).exception("Непредвиденная ошибка")
 
     def is_alive(self, max_silence: float = 30.0) -> bool:
         if not self._running:

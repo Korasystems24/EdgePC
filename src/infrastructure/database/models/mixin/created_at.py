@@ -1,16 +1,13 @@
-from datetime import UTC, datetime
+from datetime import datetime
 
-from sqlalchemy import func
 from sqlalchemy.orm import Mapped, mapped_column
 
-
-def get_current_dt() -> datetime:
-    dt = datetime.now(tz=UTC)
-    return dt.replace(microsecond=0, tzinfo=None)
+from src.infrastructure.database.types import UTCDateTime, utc_now
 
 
-class CreatedAtVO:
+class CreatedAtMixin:
     created_at: Mapped[datetime] = mapped_column(
-        default=get_current_dt,
-        server_default=func.now(),
+        UTCDateTime(),
+        default=utc_now,
+        nullable=False,
     )

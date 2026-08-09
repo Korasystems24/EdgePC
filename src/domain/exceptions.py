@@ -30,3 +30,27 @@ class TelemetryStorageError(Exception):
     Пакет собран успешно, но не удалось сохранить его в хранилище.
     Источник ни при чём — проблема на нашей стороне (БД, диск).
     """
+
+
+class NetworkSourseError(Exception):
+    """
+    Базовое исключение для проблем со всеми сетевыми данными.
+    """
+
+
+class NetworkUnavailable(NetworkSourseError):
+    """
+    временно: сеть, timeout, 429, 5xx;
+    """
+
+
+class DispatchRejected(NetworkSourseError):
+    """
+    сервер отверг данные с 422;
+    """
+
+
+class DispatchMisconfigured(NetworkSourseError):
+    """
+    неверный токен или контракт: 400, 401, 403.
+    """
