@@ -19,6 +19,7 @@ class SqlAlchemyTelemetryRepository(TelemetryRepository):
         self._mapper = TelemetryPacketMapper()
 
     async def save(self, packet: TelemetryPacket) -> None:
+        """Записать новый пакет."""
         model = self._mapper.to_model(packet)
         try:
             async with self._db_client.session() as session:
@@ -31,12 +32,14 @@ class SqlAlchemyTelemetryRepository(TelemetryRepository):
 
     @staticmethod
     def _pending_filter() -> tuple[ColumnElement[bool], ColumnElement[bool]]:
+        """Ещё не уехало и не в карантине."""
         return (
             TelemetryPacketModel.sent_at.is_(None),
             TelemetryPacketModel.quarantined_at.is_(None),
         )
 
-    async def fetch_pending(self, limit: int) -> list[StoredPacket]:
+    async def get_pending(self, limit: int) -> list[StoredPacket]:
+        """Взять пачку ещё не отправленных."""
         try:
             async with self._db_client.session() as session:
                 result = await session.execute(
@@ -55,7 +58,8 @@ class SqlAlchemyTelemetryRepository(TelemetryRepository):
                 f"Не удалось получить ожидающие пакеты: {e}"
             ) from e
 
-    async def count_pending(self) -> int:
+    async def get_pending_count(self) -> int:
+        """Сколько ещё ждёт отправки."""
         try:
             async with self._db_client.session() as session:
                 result = await session.execute(
@@ -69,7 +73,8 @@ class SqlAlchemyTelemetryRepository(TelemetryRepository):
                 f"Не удалось посчитать ожидающие пакеты: {e}"
             ) from e
 
-    async def count_quarantined(self) -> int:
+    async def get_quarantined_count(self) -> int:
+        """Сколько лежит в карантине."""
         try:
             async with self._db_client.session() as session:
                 result = await session.execute(
@@ -83,7 +88,8 @@ class SqlAlchemyTelemetryRepository(TelemetryRepository):
                 f"Не удалось посчитать пакеты в карантине: {e}"
             ) from e
 
-    async def mark_sent(self, ids: list[int]) -> None:
+    async def set_sent(self, ids: list[int]) -> None:
+        """Пометить: сервер принял."""
         if not ids:
             return
         try:
@@ -99,7 +105,8 @@ class SqlAlchemyTelemetryRepository(TelemetryRepository):
                 f"Не удалось пометить пакеты отправленными: {e}"
             ) from e
 
-    async def record_rejection(self, ids: list[int], quarantine_after: int) -> None:
+    async def update_rejected(self, ids: list[int], quarantine_after: int) -> None:
+        """Сервер отверг: +1 попытка, после порога убрать в карантин."""
         if not ids:
             return
         try:
@@ -138,7 +145,8 @@ class SqlAlchemyTelemetryRepository(TelemetryRepository):
                 f"Не удалось обработать отклонение пакетов: {e}"
             ) from e
 
-    async def purge_sent_older_than(self, cutoff: datetime) -> int:
+    async def delete_sent_older_than(self, cutoff: datetime) -> int:
+        """Стереть уже отправленные старше даты."""
         try:
             async with self._db_client.session() as session:
                 result = await session.execute(

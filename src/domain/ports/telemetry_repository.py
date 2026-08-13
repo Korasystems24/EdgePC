@@ -7,28 +7,37 @@ from src.domain.entities.telemetry_packet import TelemetryPacket
 
 @dataclass(frozen=True)
 class StoredPacket:
+    """Пакет из таблицы плюс его id, чтобы потом пометить именно эту строку."""
+
     id: int
     packet: TelemetryPacket
 
 
 class TelemetryRepository(ABC):
     @abstractmethod
-    async def save(self, packet: TelemetryPacket) -> None: ...
+    async def save(self, packet: TelemetryPacket) -> None:
+        """Записать новый пакет."""
 
     @abstractmethod
-    async def fetch_pending(self, limit: int) -> list[StoredPacket]: ...
+    async def get_pending(self, limit: int) -> list[StoredPacket]:
+        """Взять пачку ещё не отправленных (не уехавших и не в карантине)."""
 
     @abstractmethod
-    async def mark_sent(self, ids: list[int]) -> None: ...
+    async def set_sent(self, ids: list[int]) -> None:
+        """Пометить: сервер принял."""
 
     @abstractmethod
-    async def record_rejection(self, ids: list[int], quarantine_after: int) -> None: ...
+    async def update_rejected(self, ids: list[int], quarantine_after: int) -> None:
+        """Сервер отверг: +1 попытка, после порога убрать в карантин."""
 
     @abstractmethod
-    async def purge_sent_older_than(self, cutoff: datetime) -> int: ...
+    async def delete_sent_older_than(self, cutoff: datetime) -> int:
+        """Стереть уже отправленные старше даты. Неотправленные не трогать."""
 
     @abstractmethod
-    async def count_pending(self) -> int: ...
+    async def get_pending_count(self) -> int:
+        """Сколько ещё ждёт отправки."""
 
     @abstractmethod
-    async def count_quarantined(self) -> int: ...
+    async def get_quarantined_count(self) -> int:
+        """Сколько лежит в карантине."""

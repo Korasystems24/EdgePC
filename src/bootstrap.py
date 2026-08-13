@@ -41,6 +41,9 @@ def _build_worker_manager(
         repository=telemetry_repository,
         gateway=gateway,
         batch_size=app_settings.dispatch.batch_size,
+        retention_ttl=app_settings.dispatch.retention_ttl,
+        mass_rejection_sample=app_settings.dispatch.mass_rejection_sample,
+        quarantine_after_attempts=app_settings.dispatch.quarantine_after_attempts,
     )
     dispatch_worker = DispatchWorker(
         name="dispatch",

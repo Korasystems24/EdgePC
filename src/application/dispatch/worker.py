@@ -29,6 +29,7 @@ class DispatchWorker:
         self._last_heartbeat: float = 0.0
         self._consecutive_failures = 0
         self._fatal_error: FatalError | None = None
+        self._deadline: float = 0.0
 
     @property
     def fatal_error(self) -> FatalError | None:
@@ -38,9 +39,10 @@ class DispatchWorker:
         self._running = True
         self._fatal_error = None
         logger.bind(worker=self.name).info("Воркер запущен")
-
+        self._set_deadline()
         while self._running:
             tick_started_at = time.monotonic()
+
             await self._safe_tick()
             self._last_heartbeat = time.monotonic()
 
@@ -67,6 +69,7 @@ class DispatchWorker:
     async def _safe_tick(self) -> None:
         try:
             sent = await self._service.dispatch_once()
+            await self._clear_ttl(self._deadline)
             if sent:
                 logger.bind(worker=self.name).info("Отправлено {} пакетов", sent)
             self._consecutive_failures = 0
@@ -96,6 +99,19 @@ class DispatchWorker:
         if not self._running:
             return False
         return (time.monotonic() - self._last_heartbeat) < max_silence
+
+    async def _clear_ttl(self, deadline: float) -> None:
+        if time.monotonic() > deadline:
+            await self._service.delete_sent_older_than()
+            logger.bind(worker=self.name).info(
+                "Удалены отправленные пакеты, установлен новый дедлайн"
+            )
+            self._set_deadline()
+
+    def _set_deadline(self) -> None:
+        self._deadline = (
+            time.monotonic() + self._settings.waiting_period_ttl.total_seconds()
+        )
 
     def stop(self) -> None:
         self._running = False

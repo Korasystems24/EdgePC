@@ -43,6 +43,7 @@ class DispatchSettings(BaseModel):
     interval: float = 10.0
     batch_size: int = 200
     retention_ttl: timedelta = timedelta(days=7)
+    waiting_period_ttl: timedelta = timedelta(hours=1)
     quarantine_after_attempts: int = 3
     mass_rejection_sample: int = 10
     server_url: str = ""
