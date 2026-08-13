@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from src.domain.entities.telemetry_packet import TelemetryPacket
-from src.domain.enum import BeamStatus, SourceState
+from src.domain.enum import BeamStatus
 from src.domain.value_objects.beam import Beam
 from src.infrastructure.radar.wcf.dto import WCFBeamDTO, WCFDataDTO, WCFVesselDTO
 
@@ -14,7 +14,6 @@ class RadarMapper:
             mass=tank_data.mass,
             volume=None,  # TODO: уточнить формулу расчёта объёма
             beams=self._map_beams(vessel),
-            source_state=SourceState.HEALTHY,
         )
 
     @staticmethod

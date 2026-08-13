@@ -3,6 +3,7 @@ import random
 from datetime import UTC, datetime
 
 from src.domain.entities.telemetry_packet import TelemetryPacket
+from src.domain.exceptions import RadarSourceUnavailable
 from src.domain.ports.radar_adapter import RadarAdapter
 from src.domain.value_objects.beam import Beam
 
@@ -17,17 +18,16 @@ class MockRadarAdapter(RadarAdapter):
         await asyncio.sleep(self.delay)
 
         if random.random() <= self.fail:
-            raise ValueError()
-        ts = datetime.now(tz=UTC).timestamp()
+            raise RadarSourceUnavailable("Mock: симулированный сбой источника")
+        ts = datetime.now(tz=UTC)
 
         beams = [
             Beam(
-                index=index,
-                distance=random.uniform(1000, 2000),
-                raw_status=random.uniform(0, 1),
-                status_flags=[],
+                height=random.uniform(1000, 2000),
+                raw_status=0,
+                status=(),
             )
-            for index in range(64)
+            for _ in range(64)
         ]
 
         volume, mass, avg_level = [random.randint(1000, 2000) for _ in range(3)]
@@ -38,5 +38,4 @@ class MockRadarAdapter(RadarAdapter):
             mass=mass,
             avg_level=avg_level,
             beams=beams,
-            source_state="HEALTHY",
         )

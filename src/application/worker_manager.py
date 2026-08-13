@@ -2,11 +2,11 @@ import asyncio
 
 from loguru import logger
 
-from src.application.ingestion.worker import IngestionWorker
+from src.application.ports.worker import Worker
 
 
 class WorkerManager:
-    def __init__(self, workers: list[IngestionWorker]) -> None:
+    def __init__(self, workers: list[Worker]) -> None:
         self._workers = workers
 
     async def run_all(self) -> None:
@@ -24,5 +24,5 @@ class WorkerManager:
 
     def health_report(self) -> dict[str, bool]:
         report = {w.name: w.is_alive() for w in self._workers}
-        logger.debug("Health report: {}", report)
+        logger.info("Health report: {}", report)
         return report
