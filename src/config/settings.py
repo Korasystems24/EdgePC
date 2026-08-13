@@ -47,7 +47,12 @@ class DispatchSettings(BaseModel):
     mass_rejection_sample: int = 10
     server_url: str = ""
     auth_token: SecretStr = SecretStr("")
-    bunker_id: str = ""
+    connect_timeout: float = 5.0
+    read_timeout: float = 5.0
+    write_timeout: float = 5.0
+    pool_timeout: float = 5.0
+    retry_attempts: int = 3
+    retry_wait_max: float = 4.0
 
 
 class Settings(BaseSettings):

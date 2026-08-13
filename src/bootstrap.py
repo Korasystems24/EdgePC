@@ -8,6 +8,7 @@ from src.application.ingestion.service import IngestionService
 from src.application.ingestion.worker import IngestionWorker
 from src.application.worker_manager import WorkerManager
 from src.config.settings import Settings, settings
+from src.domain.ports.network_gateway import NetworkGateway
 from src.infrastructure.database.base_client import DatabaseClient
 from src.infrastructure.database.repositories.telemetry_repository import (
     SqlAlchemyTelemetryRepository,
@@ -18,12 +19,13 @@ from src.infrastructure.radar.factory import create_radar_adapter
 
 
 def _build_worker_manager(
-    app_settings: Settings, db_client: DatabaseClient
+    app_settings: Settings,
+    db_client: DatabaseClient,
+    gateway: NetworkGateway,
 ) -> WorkerManager:
     """Сборка графа зависимостей. Новые сервисы и воркеры добавляются здесь."""
     radar_adapter = create_radar_adapter(app_settings)
     telemetry_repository = SqlAlchemyTelemetryRepository(db_client)
-    gateway = create_network_gateway(app_settings)
 
     ingestion_service = IngestionService(
         radar_adapter=radar_adapter,
@@ -69,10 +71,14 @@ async def bootstrap_application(app_settings: Settings = settings) -> None:
     log.info("Запуск приложения в боевом режиме")
 
     db_client = SqliteClient(url=app_settings.db.url)
+    gateway = create_network_gateway(app_settings)
     try:
         await db_client.init_database()
-        manager = _build_worker_manager(app_settings, db_client)
+        manager = _build_worker_manager(app_settings, db_client, gateway)
         await _run(manager)
     finally:
-        await db_client.close()
-        log.info("Все компоненты успешно очищены. Программа завершена.")
+        try:
+            await gateway.close()
+        finally:
+            await db_client.close()
+            log.info("Все компоненты успешно очищены. Программа завершена.")
