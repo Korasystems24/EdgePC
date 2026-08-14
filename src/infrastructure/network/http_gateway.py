@@ -99,7 +99,7 @@ class HttpGateway(NetworkGateway):
 
     def _log_retry(self, retry_state: RetryCallState) -> None:
         exc = retry_state.outcome.exception() if retry_state.outcome else None
-        logger.warning(
+        logger.debug(
             "Сеть моргнула, повтор {}/{}: {}",
             retry_state.attempt_number,
             self._settings.retry_attempts,

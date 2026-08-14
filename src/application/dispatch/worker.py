@@ -12,6 +12,8 @@ from src.domain.exceptions import (
     TelemetryStorageError,
 )
 
+_NETWORK_LOG_INTERVAL_S = 60.0
+
 
 class DispatchWorker:
     def __init__(
@@ -30,6 +32,8 @@ class DispatchWorker:
         self._consecutive_failures = 0
         self._fatal_error: FatalError | None = None
         self._deadline: float = 0.0
+        self._network_unavailable = False
+        self._last_network_log_at: float = 0.0
 
     @property
     def fatal_error(self) -> FatalError | None:
@@ -70,13 +74,18 @@ class DispatchWorker:
         try:
             sent = await self._service.dispatch_once()
             await self._clear_ttl(self._deadline)
-            if sent:
+            if self._network_unavailable and sent:
+                self._network_unavailable = False
+                self._last_network_log_at = 0.0
+                logger.bind(worker=self.name).info(
+                    "Сеть восстановилась, отправлено {} пакетов", sent
+                )
+            elif sent:
                 logger.bind(worker=self.name).info("Отправлено {} пакетов", sent)
             self._consecutive_failures = 0
         except NetworkUnavailable as e:
-            logger.bind(worker=self.name).warning(
-                "Сети нет, пакеты копятся в outbox: {}", e
-            )
+            self._network_unavailable = True
+            self._log_network_unavailable(e)
         except DispatchMisconfigured as e:
             logger.bind(worker=self.name).critical(
                 "Требуется вмешательство в конфигурацию, остановка воркера: {}", e
@@ -94,6 +103,15 @@ class DispatchWorker:
                 self._max_consecutive_failures,
                 e,
             )
+
+    def _log_network_unavailable(self, error: NetworkUnavailable) -> None:
+        now = time.monotonic()
+        if now - self._last_network_log_at < _NETWORK_LOG_INTERVAL_S:
+            return
+        self._last_network_log_at = now
+        logger.bind(worker=self.name).warning(
+            "Сети нет, пакеты копятся в outbox: {}", error
+        )
 
     def is_alive(self, max_silence: float = 30.0) -> bool:
         if not self._running:
