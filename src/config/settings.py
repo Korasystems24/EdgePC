@@ -11,16 +11,28 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.domain.enum import NetworkGatewayType, RadarSourceType
 
+_BYTES_IN_MIB = 1024 * 1024
+
 
 class DatabaseSettings(BaseModel):
     """Настройки подключения к БД."""
 
     name: str = "app.db"
     dir: str = "data"
+    min_free_mb: int = 200
+    resume_free_mb: int = 250
 
     @property
     def url(self) -> str:
         return f"sqlite+aiosqlite:///{self.dir}/{self.name}"
+
+    @property
+    def min_free_bytes(self) -> int:
+        return self.min_free_mb * _BYTES_IN_MIB
+
+    @property
+    def resume_free_bytes(self) -> int:
+        return self.resume_free_mb * _BYTES_IN_MIB
 
 
 class WcfSettings(BaseModel):
@@ -43,6 +55,7 @@ class DispatchSettings(BaseModel):
     interval: float = 10.0
     batch_size: int = 200
     retention_ttl: timedelta = timedelta(days=7)
+    waiting_period_ttl: timedelta = timedelta(hours=1)
     quarantine_after_attempts: int = 3
     mass_rejection_sample: int = 10
     server_url: str = ""

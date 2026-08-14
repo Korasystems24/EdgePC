@@ -12,6 +12,8 @@ from src.domain.exceptions import (
     TelemetryStorageError,
 )
 
+_NETWORK_LOG_INTERVAL_S = 60.0
+
 
 class DispatchWorker:
     def __init__(
@@ -29,6 +31,9 @@ class DispatchWorker:
         self._last_heartbeat: float = 0.0
         self._consecutive_failures = 0
         self._fatal_error: FatalError | None = None
+        self._deadline: float = 0.0
+        self._network_unavailable = False
+        self._last_network_log_at: float = 0.0
 
     @property
     def fatal_error(self) -> FatalError | None:
@@ -38,9 +43,10 @@ class DispatchWorker:
         self._running = True
         self._fatal_error = None
         logger.bind(worker=self.name).info("Воркер запущен")
-
+        self._set_deadline()
         while self._running:
             tick_started_at = time.monotonic()
+
             await self._safe_tick()
             self._last_heartbeat = time.monotonic()
 
@@ -67,13 +73,19 @@ class DispatchWorker:
     async def _safe_tick(self) -> None:
         try:
             sent = await self._service.dispatch_once()
-            if sent:
+            await self._clear_ttl(self._deadline)
+            if self._network_unavailable and sent:
+                self._network_unavailable = False
+                self._last_network_log_at = 0.0
+                logger.bind(worker=self.name).info(
+                    "Сеть восстановилась, отправлено {} пакетов", sent
+                )
+            elif sent:
                 logger.bind(worker=self.name).info("Отправлено {} пакетов", sent)
             self._consecutive_failures = 0
         except NetworkUnavailable as e:
-            logger.bind(worker=self.name).warning(
-                "Сети нет, пакеты копятся в outbox: {}", e
-            )
+            self._network_unavailable = True
+            self._log_network_unavailable(e)
         except DispatchMisconfigured as e:
             logger.bind(worker=self.name).critical(
                 "Требуется вмешательство в конфигурацию, остановка воркера: {}", e
@@ -92,10 +104,32 @@ class DispatchWorker:
                 e,
             )
 
+    def _log_network_unavailable(self, error: NetworkUnavailable) -> None:
+        now = time.monotonic()
+        if now - self._last_network_log_at < _NETWORK_LOG_INTERVAL_S:
+            return
+        self._last_network_log_at = now
+        logger.bind(worker=self.name).warning(
+            "Сети нет, пакеты копятся в outbox: {}", error
+        )
+
     def is_alive(self, max_silence: float = 30.0) -> bool:
         if not self._running:
             return False
         return (time.monotonic() - self._last_heartbeat) < max_silence
+
+    async def _clear_ttl(self, deadline: float) -> None:
+        if time.monotonic() > deadline:
+            await self._service.delete_sent_older_than()
+            logger.bind(worker=self.name).info(
+                "Удалены отправленные пакеты, установлен новый дедлайн"
+            )
+            self._set_deadline()
+
+    def _set_deadline(self) -> None:
+        self._deadline = (
+            time.monotonic() + self._settings.waiting_period_ttl.total_seconds()
+        )
 
     def stop(self) -> None:
         self._running = False

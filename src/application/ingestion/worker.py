@@ -11,6 +11,10 @@ from src.domain.exceptions import (
     RadarSourceUnavailable,
     TelemetryStorageError,
 )
+from src.domain.ports.storage_monitor import StorageMonitor
+
+_MIB = 1024 * 1024
+_STORAGE_LOG_INTERVAL_S = 60.0
 
 
 class IngestionWorker:
@@ -18,21 +22,33 @@ class IngestionWorker:
         self,
         name: str,
         service: IngestionService,
+        storage_monitor: StorageMonitor,
         interval: float = 5.0,
+        min_free_bytes: int = 200 * _MIB,
+        resume_free_bytes: int = 250 * _MIB,
         max_consecutive_failures: int = 10,
     ) -> None:
         self.name = name
         self._service = service
+        self._storage_monitor = storage_monitor
         self._interval = interval
+        self._min_free_bytes = min_free_bytes
+        self._resume_free_bytes = resume_free_bytes
         self._max_consecutive_failures = max_consecutive_failures
         self._running = False
         self._last_heartbeat: float = 0.0
         self._consecutive_failures = 0
         self._fatal_error: FatalError | None = None
+        self._storage_paused = False
+        self._last_storage_log_at: float = 0.0
 
     @property
     def fatal_error(self) -> FatalError | None:
         return self._fatal_error
+
+    @property
+    def storage_paused(self) -> bool:
+        return self._storage_paused
 
     async def start(self) -> None:
         self._running = True
@@ -66,6 +82,19 @@ class IngestionWorker:
 
     async def _safe_tick(self) -> None:
         try:
+            if not self._storage_allows_write():
+                return
+        except TelemetryStorageError as e:
+            self._consecutive_failures += 1
+            logger.bind(worker=self.name).error(
+                "Не удалось проверить свободное место ({}/{}): {}",
+                self._consecutive_failures,
+                self._max_consecutive_failures,
+                e,
+            )
+            return
+
+        try:
             await self._service.collect_once()
             self._consecutive_failures = 0
         except RadarSourceUnavailable as e:
@@ -97,6 +126,37 @@ class IngestionWorker:
             logger.bind(worker=self.name).warning(
                 "Некорректные данные, пропуск тика: {}", e
             )
+
+    def _storage_allows_write(self) -> bool:
+        free_bytes = self._storage_monitor.free_bytes()
+        if self._storage_paused:
+            if free_bytes >= self._resume_free_bytes:
+                self._storage_paused = False
+                self._last_storage_log_at = 0.0
+                logger.bind(worker=self.name).info(
+                    "Свободное место восстановлено ({} MiB), сбор возобновлён",
+                    free_bytes // _MIB,
+                )
+                return True
+            self._log_storage_paused(free_bytes)
+            return False
+        if free_bytes < self._min_free_bytes:
+            self._storage_paused = True
+            self._log_storage_paused(free_bytes)
+            return False
+        return True
+
+    def _log_storage_paused(self, free_bytes: int) -> None:
+        now = time.monotonic()
+        if now - self._last_storage_log_at < _STORAGE_LOG_INTERVAL_S:
+            return
+        self._last_storage_log_at = now
+        logger.bind(worker=self.name).error(
+            "Недостаточно места на диске БД (свободно {} MiB, пауза ниже {} MiB), "
+            "чтение пакета пропущено; pending не удаляются",
+            free_bytes // _MIB,
+            self._min_free_bytes // _MIB,
+        )
 
     def is_alive(self, max_silence: float = 30.0) -> bool:
         if not self._running:

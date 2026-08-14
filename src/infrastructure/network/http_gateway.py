@@ -1,3 +1,5 @@
+from typing import Any
+
 import httpx
 from loguru import logger
 from tenacity import (
@@ -49,14 +51,12 @@ class HttpGateway(NetworkGateway):
         await self._client.aclose()
 
     async def _post_once(self, packets: list[TelemetryPacket]) -> None:
-        payload = {
+        payload: dict[str, str | list[dict[str, Any]]] = {
             "bunker_id": self._bunker_id,
             "packets": [packet.model_dump(mode="json") for packet in packets],
         }
         headers = {
-            "Authorization": (
-                f"Bearer {self._settings.auth_token.get_secret_value()}"
-            ),
+            "Authorization": (f"Bearer {self._settings.auth_token.get_secret_value()}"),
         }
 
         try:
@@ -99,7 +99,7 @@ class HttpGateway(NetworkGateway):
 
     def _log_retry(self, retry_state: RetryCallState) -> None:
         exc = retry_state.outcome.exception() if retry_state.outcome else None
-        logger.warning(
+        logger.debug(
             "Сеть моргнула, повтор {}/{}: {}",
             retry_state.attempt_number,
             self._settings.retry_attempts,
