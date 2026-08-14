@@ -14,6 +14,9 @@ class IngestionService:
         self._radar_adapter = radar_adapter
         self._repository = repository
 
+    def raise_if_hung(self) -> None:
+        self._radar_adapter.raise_if_hung()
+
     async def collect_once(self) -> TelemetryPacket:
         packet = await self._radar_adapter.read_packet()
         await self._repository.save(packet)

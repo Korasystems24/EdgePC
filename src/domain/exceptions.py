@@ -13,7 +13,15 @@ class RadarSourceUnavailable(RadarSourceError):
 class RadarSourceMisconfigured(RadarSourceError):
     """
     Источник настроен неверно (например, найдено 2 vessel вместо 1).
+    Пустой каталог при старте LIMACO сюда не входит — это Unavailable.
     Само не пройдёт — нужно вмешательство человека в конфигурацию.
+    """
+
+
+class RadarSourceHung(RadarSourceError):
+    """
+    Блокирующее чтение источника не вернуло управление после дедлайна.
+    Отмена await поток не останавливает; следующий тик поверх него нельзя.
     """
 
 

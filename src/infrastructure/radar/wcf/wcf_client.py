@@ -11,18 +11,21 @@ class WCFClient:
     def __init__(
         self,
         wsdl_url: str | None,
+        timeout: int,
     ) -> None:
 
         self.wsdl_url = wsdl_url
         self._client: Client | None = None
 
-        session = requests.Session()
-
+        self._session = requests.Session()
         self._transport = Transport(
-            session=session,
-            timeout=5,
-            operation_timeout=5,
+            session=self._session,
+            timeout=timeout,
+            operation_timeout=timeout,
         )
+
+    def close(self) -> None:
+        self._session.close()
 
     def initialize(self) -> None:
 

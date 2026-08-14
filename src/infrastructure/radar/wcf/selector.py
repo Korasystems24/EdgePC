@@ -1,21 +1,32 @@
-from src.infrastructure.radar.wcf.exceptions import RadarSelectionError
-from src.infrastructure.radar.wcf.wcf_client import WCFClient
+from typing import Protocol
+
+from src.infrastructure.radar.wcf.exceptions import (
+    RadarCatalogNotReady,
+    RadarSelectionError,
+)
+
+
+class WCFCatalog(Protocol):
+    def get_park_names(self) -> list[str]: ...
+    def get_vessel_names(self, park_name: str) -> list[str]: ...
 
 
 class WCFResourceSelector:
-    def __init__(self, client: WCFClient) -> None:
+    def __init__(self, client: WCFCatalog) -> None:
         self._client = client
 
     def select(self) -> tuple[str, str]:
-        parks = self._client.get_park_names()
+        park = self._exactly_one(self._client.get_park_names(), "parks")
+        vessel = self._exactly_one(
+            self._client.get_vessel_names(park),
+            "vessels",
+        )
+        return park, vessel
 
-        if len(parks) != 1:
-            raise RadarSelectionError(f"Найдено parks: {len(parks)}")
-
-        park = parks[0]
-        vessels = self._client.get_vessel_names(park)
-
-        if len(vessels) != 1:
-            raise RadarSelectionError(f"Найдено vessels: {len(vessels)}")
-
-        return park, vessels[0]
+    @staticmethod
+    def _exactly_one(items: list[str], kind: str) -> str:
+        if len(items) == 0:
+            raise RadarCatalogNotReady(f"каталог LIMACO ещё пуст: {kind}=0")
+        if len(items) != 1:
+            raise RadarSelectionError(f"Найдено {kind}: {len(items)}")
+        return items[0]
