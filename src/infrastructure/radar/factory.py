@@ -17,7 +17,10 @@ def create_radar_adapter(settings: Settings) -> RadarAdapter:
 
     if settings.radar_source == RadarSourceType.WCF:
         return WCFRadarAdapter(
-            client=WCFClient(wsdl_url=settings.wcf.wsdl_url),
+            client=WCFClient(
+                wsdl_url=settings.wcf.wsdl_url,
+                timeout=settings.wcf.timeout,
+            ),
             mapper=RadarMapper(),
         )
 

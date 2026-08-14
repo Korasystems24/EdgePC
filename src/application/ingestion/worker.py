@@ -1,12 +1,12 @@
 import asyncio
 import time
 
-from loguru import logger
-
 from src.application.ingestion.service import IngestionService
 from src.application.ports.worker import FatalError
+from src.application.tick_worker import TickWorker
 from src.domain.exceptions import (
     RadarDataInvalid,
+    RadarSourceHung,
     RadarSourceMisconfigured,
     RadarSourceUnavailable,
     TelemetryStorageError,
@@ -17,68 +17,36 @@ _MIB = 1024 * 1024
 _STORAGE_LOG_INTERVAL_S = 60.0
 
 
-class IngestionWorker:
+class IngestionWorker(TickWorker):
     def __init__(
         self,
         name: str,
         service: IngestionService,
         storage_monitor: StorageMonitor,
         interval: float = 5.0,
+        tick_deadline: float = 8.0,
         min_free_bytes: int = 200 * _MIB,
         resume_free_bytes: int = 250 * _MIB,
         max_consecutive_failures: int = 10,
+        heartbeat_max_silence: float = 30.0,
     ) -> None:
-        self.name = name
+        super().__init__(
+            name=name,
+            interval=interval,
+            max_consecutive_failures=max_consecutive_failures,
+            heartbeat_max_silence=heartbeat_max_silence,
+        )
         self._service = service
         self._storage_monitor = storage_monitor
-        self._interval = interval
+        self._tick_deadline = tick_deadline
         self._min_free_bytes = min_free_bytes
         self._resume_free_bytes = resume_free_bytes
-        self._max_consecutive_failures = max_consecutive_failures
-        self._running = False
-        self._last_heartbeat: float = 0.0
-        self._consecutive_failures = 0
-        self._fatal_error: FatalError | None = None
         self._storage_paused = False
         self._last_storage_log_at: float = 0.0
 
     @property
-    def fatal_error(self) -> FatalError | None:
-        return self._fatal_error
-
-    @property
     def storage_paused(self) -> bool:
         return self._storage_paused
-
-    async def start(self) -> None:
-        self._running = True
-        self._fatal_error = None
-        logger.bind(worker=self.name).info("Воркер запущен")
-
-        while self._running:
-            tick_started_at = time.monotonic()
-            await self._safe_tick()
-            self._last_heartbeat = time.monotonic()
-
-            if self._fatal_error is not None:
-                break
-
-            if self._consecutive_failures >= self._max_consecutive_failures:
-                logger.bind(worker=self.name).critical(
-                    "Превышен лимит подряд идущих ошибок ({}), остановка воркера",
-                    self._consecutive_failures,
-                )
-                self._fatal_error = FatalError(
-                    reason=(
-                        f"too many consecutive failures ({self._consecutive_failures})"
-                    ),
-                    restartable=False,
-                )
-                self._running = False
-                break
-
-            elapsed = time.monotonic() - tick_started_at
-            await asyncio.sleep(max(0.0, self._interval - elapsed))
 
     async def _safe_tick(self) -> None:
         try:
@@ -86,7 +54,7 @@ class IngestionWorker:
                 return
         except TelemetryStorageError as e:
             self._consecutive_failures += 1
-            logger.bind(worker=self.name).error(
+            self._log.error(
                 "Не удалось проверить свободное место ({}/{}): {}",
                 self._consecutive_failures,
                 self._max_consecutive_failures,
@@ -95,18 +63,21 @@ class IngestionWorker:
             return
 
         try:
-            await self._service.collect_once()
+            async with asyncio.timeout(self._tick_deadline):
+                await self._service.collect_once()
             self._consecutive_failures = 0
+        except TimeoutError:
+            self._on_tick_deadline_exceeded()
         except RadarSourceUnavailable as e:
             self._consecutive_failures += 1
-            logger.bind(worker=self.name).warning(
+            self._log.warning(
                 "Источник недоступен ({}/{}): {}",
                 self._consecutive_failures,
                 self._max_consecutive_failures,
                 e,
             )
         except RadarSourceMisconfigured as e:
-            logger.bind(worker=self.name).critical(
+            self._log.critical(
                 "Требуется вмешательство в конфигурацию, остановка воркера: {}", e
             )
             self._fatal_error = FatalError(
@@ -116,16 +87,34 @@ class IngestionWorker:
             self._running = False
         except TelemetryStorageError as e:
             self._consecutive_failures += 1
-            logger.bind(worker=self.name).error(
+            self._log.error(
                 "Пакет собран, но не сохранён ({}/{}): {}",
                 self._consecutive_failures,
                 self._max_consecutive_failures,
                 e,
             )
         except RadarDataInvalid as e:
-            logger.bind(worker=self.name).warning(
+            self._log.warning(
                 "Некорректные данные, пропуск тика: {}", e
             )
+
+    def _on_tick_deadline_exceeded(self) -> None:
+        try:
+            self._service.raise_if_hung()
+        except RadarSourceHung as e:
+            self._log.critical(
+                "Чтение источника пережило дедлайн тика, остановка воркера: {}", e
+            )
+            self._fatal_error = FatalError(reason=str(e), restartable=True)
+            self._running = False
+            return
+
+        self._consecutive_failures += 1
+        self._log.error(
+            "Тик превысил дедлайн ({}/{})",
+            self._consecutive_failures,
+            self._max_consecutive_failures,
+        )
 
     def _storage_allows_write(self) -> bool:
         free_bytes = self._storage_monitor.free_bytes()
@@ -133,7 +122,7 @@ class IngestionWorker:
             if free_bytes >= self._resume_free_bytes:
                 self._storage_paused = False
                 self._last_storage_log_at = 0.0
-                logger.bind(worker=self.name).info(
+                self._log.info(
                     "Свободное место восстановлено ({} MiB), сбор возобновлён",
                     free_bytes // _MIB,
                 )
@@ -151,18 +140,9 @@ class IngestionWorker:
         if now - self._last_storage_log_at < _STORAGE_LOG_INTERVAL_S:
             return
         self._last_storage_log_at = now
-        logger.bind(worker=self.name).error(
+        self._log.error(
             "Недостаточно места на диске БД (свободно {} MiB, пауза ниже {} MiB), "
             "чтение пакета пропущено; pending не удаляются",
             free_bytes // _MIB,
             self._min_free_bytes // _MIB,
         )
-
-    def is_alive(self, max_silence: float = 30.0) -> bool:
-        if not self._running:
-            return False
-        return (time.monotonic() - self._last_heartbeat) < max_silence
-
-    def stop(self) -> None:
-        self._running = False
-        logger.bind(worker=self.name).info("Воркер остановлен")
