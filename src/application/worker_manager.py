@@ -85,25 +85,23 @@ class WorkerManager:
         if not self._tasks:
             return
 
-        self._log.info("Ожидание остановки воркеров, timeout={}с", timeout)
+        self._log.info("Ожидание остановки воркеров")
         deadline = time.monotonic() + timeout
         _done, pending = await asyncio.wait(self._tasks.values(), timeout=timeout)
         if not pending:
             return
         for task in pending:
             self._log.warning(
-                "Воркер {} не завершился за {}с, отменяем",
+                "Воркер {} не завершился вовремя, отменяем",
                 task.get_name(),
-                timeout,
             )
             task.cancel()
         remaining = max(0.0, deadline - time.monotonic())
         _done, pending = await asyncio.wait(pending, timeout=remaining)
         for task in pending:
             self._log.error(
-                "Воркер {} не завершился после отмены за {}с",
+                "Воркер {} не завершился после отмены",
                 task.get_name(),
-                timeout,
             )
 
     def health_report(self) -> dict[str, bool]:
