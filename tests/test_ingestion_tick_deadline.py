@@ -79,7 +79,6 @@ async def test_hung_blocking_read_sets_restartable_fatal_and_does_not_call_twice
         storage_monitor=_FakeStorage(),
         interval=0.05,
         tick_deadline=0.2,
-        max_consecutive_failures=10,
     )
     task = asyncio.create_task(worker.start())
     try:
@@ -114,7 +113,6 @@ async def test_cooperative_async_timeout_is_ordinary_failure_not_fatal() -> None
         storage_monitor=_FakeStorage(),
         interval=0.05,
         tick_deadline=0.15,
-        max_consecutive_failures=10,
     )
     task = asyncio.create_task(worker.start())
     try:

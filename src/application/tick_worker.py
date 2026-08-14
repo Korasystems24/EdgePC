@@ -6,22 +6,23 @@ from loguru import logger
 
 from src.application.ports.worker import FatalError
 
+_FAILURE_LOG_INTERVAL_S = 60.0
+
 
 class TickWorker(ABC):
     def __init__(
         self,
         name: str,
         interval: float,
-        max_consecutive_failures: int = 10,
-        heartbeat_max_silence: float = 30.0,
+        heartbeat_max_silence: float = 60.0,
     ) -> None:
         self.name = name
         self._interval = interval
-        self._max_consecutive_failures = max_consecutive_failures
         self._heartbeat_max_silence = heartbeat_max_silence
         self._running = False
         self._last_heartbeat: float = 0.0
         self._consecutive_failures = 0
+        self._last_repeat_log_at: float = 0.0
         self._fatal_error: FatalError | None = None
         self._stop = asyncio.Event()
         self._log = logger.bind(name=name)
@@ -36,6 +37,29 @@ class TickWorker(ABC):
 
     def _on_started(self) -> None:
         return None
+
+    def _should_log_failure(self) -> bool:
+        now = time.monotonic()
+        if (
+            self._last_repeat_log_at != 0.0
+            and now - self._last_repeat_log_at < _FAILURE_LOG_INTERVAL_S
+        ):
+            return False
+        self._last_repeat_log_at = now
+        return True
+
+    def _log_tick_failure(self, level: str, template: str, *args: object) -> None:
+        if not self._should_log_failure():
+            return
+        log = getattr(self._log, level)
+        if self._consecutive_failures <= 1:
+            log(template, *args)
+            return
+        log(template + " ({} сбоев подряд)", *args, self._consecutive_failures)
+
+    def _reset_failures(self) -> None:
+        self._consecutive_failures = 0
+        self._last_repeat_log_at = 0.0
 
     @abstractmethod
     async def _safe_tick(self) -> None: ...
@@ -55,20 +79,6 @@ class TickWorker(ABC):
                 await self._safe_tick()
 
                 if self._fatal_error is not None:
-                    break
-
-                if self._consecutive_failures >= self._max_consecutive_failures:
-                    self._log.critical(
-                        "Превышен лимит подряд идущих ошибок ({}), остановка воркера",
-                        self._consecutive_failures,
-                    )
-                    self._fatal_error = FatalError(
-                        reason=(
-                            f"too many consecutive failures "
-                            f"({self._consecutive_failures})"
-                        ),
-                        restartable=False,
-                    )
                     break
 
                 elapsed = time.monotonic() - tick_started_at

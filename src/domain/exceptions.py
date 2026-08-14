@@ -62,3 +62,26 @@ class DispatchMisconfigured(NetworkSourseError):
     """
     неверный токен или контракт: 400, 401, 403.
     """
+
+
+class WorkerSupervisorError(Exception):
+    """Сбой надзора за воркерами."""
+
+
+class WorkerRestartStuck(WorkerSupervisorError):
+    """
+    stop/cancel не завершили задачу за отведённый timeout.
+    Вторую задачу поверх живой создавать нельзя — иначе будет
+    двойная отправка из dispatch.
+    """
+
+
+class WorkerAlreadyRunning(WorkerSupervisorError):
+    """Попытка запустить воркер, пока предыдущая задача ещё жива."""
+
+
+class ProcessMustExit(WorkerSupervisorError):
+    """
+    Watchdog эскалирует отказ на уровень процесса.
+    Дальше внешний supervisor (Docker restart / Windows Service recovery).
+    """

@@ -8,6 +8,12 @@ class FatalError:
     restartable: bool
 
 
+@dataclass(frozen=True)
+class TaskState:
+    done: bool
+    exception: BaseException | None
+
+
 class Worker(Protocol):
     name: str
 
