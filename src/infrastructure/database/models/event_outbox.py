@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import JSON, String
@@ -8,9 +9,10 @@ from src.infrastructure.database.models.mixin.created_at import CreatedAtMixin
 from src.infrastructure.database.models.mixin.event_id import EventIdMixin
 from src.infrastructure.database.models.mixin.int_id_pk import IntIdPkMixin
 from src.infrastructure.database.models.mixin.sent_at import SentAtMixin
+from src.infrastructure.database.types import UTCDateTime
 
 
-class EventOutbox(
+class EventOutboxModel(
     IntIdPkMixin,
     EventIdMixin,
     SentAtMixin,
@@ -29,4 +31,11 @@ class EventOutbox(
     payload: Mapped[dict[str, Any]] = mapped_column(
         JSON,
         default=dict,
+    )
+
+    quarantined_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(),
+        nullable=True,
+        index=True,
+        default=None,
     )

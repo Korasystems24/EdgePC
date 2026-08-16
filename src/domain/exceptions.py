@@ -33,32 +33,36 @@ class RadarDataInvalid(RadarSourceError):
     """
 
 
-class TelemetryStorageError(Exception):
+class StorageError(Exception):
+    """Не удалось прочитать или записать локальное хранилище (SQLite, диск)."""
+
+
+class TelemetryStorageError(StorageError):
     """
     Пакет собран успешно, но не удалось сохранить его в хранилище.
     Источник ни при чём — проблема на нашей стороне (БД, диск).
     """
 
 
-class NetworkSourseError(Exception):
+class NetworkSourceError(Exception):
     """
     Базовое исключение для проблем со всеми сетевыми данными.
     """
 
 
-class NetworkUnavailable(NetworkSourseError):
+class NetworkUnavailable(NetworkSourceError):
     """
     временно: сеть, timeout, 429, 5xx;
     """
 
 
-class DispatchRejected(NetworkSourseError):
+class DispatchRejected(NetworkSourceError):
     """
     сервер отверг данные с 422;
     """
 
 
-class DispatchMisconfigured(NetworkSourseError):
+class DispatchMisconfigured(NetworkSourceError):
     """
     неверный токен или контракт: 400, 401, 403.
     """

@@ -3,11 +3,14 @@ from datetime import UTC, datetime, timedelta
 
 from src.application.dispatch.service import DispatchService
 from src.application.dispatch.worker import DispatchWorker
+from src.application.health_store import HealthStore
 from src.application.ingestion.service import IngestionService
 from src.application.ingestion.worker import IngestionWorker
 from src.application.watchdog.worker import Watchdog
 from src.application.worker_manager import WorkerManager
-from src.config.settings import DispatchSettings
+from src.config.settings import DispatchSettings, IngestionSettings, WatchdogSettings
+from src.domain.entities.edge_event import EdgeEvent
+from src.domain.entities.health_snapshot import HealthSnapshot
 from src.domain.entities.telemetry_packet import TelemetryPacket
 from src.domain.exceptions import (
     NetworkUnavailable,
@@ -15,6 +18,8 @@ from src.domain.exceptions import (
     RadarSourceUnavailable,
     TelemetryStorageError,
 )
+from src.domain.ports.event_repository import EventRepository, StoredEvent
+from src.domain.ports.host_metrics import HostMetrics, HostResourceSample
 from src.domain.ports.network_gateway import NetworkGateway
 from src.domain.ports.radar_adapter import RadarAdapter
 from src.domain.ports.storage_monitor import StorageMonitor
@@ -51,6 +56,17 @@ class _Repo(TelemetryRepository):
 
     async def get_quarantined_count(self) -> int:
         return 0
+
+
+class _EventRepo(EventRepository):
+    async def save(self, event: EdgeEvent) -> None:
+        return None
+
+    async def get_pending(self, limit: int) -> list[StoredEvent]:
+        return []
+
+    async def set_sent(self, ids: list[int]) -> None:
+        return None
 
 
 def _packet() -> TelemetryPacket:
@@ -109,17 +125,35 @@ class _DownGateway(NetworkGateway):
     def __init__(self) -> None:
         self.calls = 0
 
-    async def send_batch(self, packets: list[TelemetryPacket]) -> None:
+    async def send_telemetry(self, packets: list[TelemetryPacket]) -> None:
         self.calls += 1
         raise NetworkUnavailable("connection refused")
+
+    async def send_events(self, events: list[EdgeEvent]) -> None:
+        raise NetworkUnavailable("connection refused")
+
+    async def send_health(self, snapshot: HealthSnapshot) -> None:
+        raise NetworkUnavailable("connection refused")
+
+
+class _Metrics(HostMetrics):
+    def sample(self) -> HostResourceSample:
+        return HostResourceSample(cpu_percent=1.0, memory_percent=2.0, disk_percent=3.0)
 
 
 def _watchdog(manager: WorkerManager) -> Watchdog:
     return Watchdog(
         manager,
-        interval=5.0,
-        restart_limit=3,
-        restart_window_seconds=60.0,
+        events=_EventRepo(),
+        telemetry=_Repo(),
+        storage=_PlentyOfDisk(),
+        host_metrics=_Metrics(),
+        health=HealthStore(),
+        settings=WatchdogSettings(
+            interval=5.0,
+            restart_limit=3,
+            restart_window_seconds=60.0,
+        ),
     )
 
 
@@ -130,9 +164,9 @@ def _ingestion(
     return IngestionWorker(
         name="ingestion",
         service=IngestionService(radar_adapter=radar, repository=repo),
+        settings=IngestionSettings(interval=0.05, tick_deadline=1.0),
         storage_monitor=_PlentyOfDisk(),
-        interval=0.05,
-        tick_deadline=1.0,
+        event_repository=_EventRepo(),
         heartbeat_max_silence=60.0,
     )
 
@@ -142,13 +176,16 @@ def _dispatch(gateway: NetworkGateway, repo: TelemetryRepository) -> DispatchWor
         name="dispatch",
         service=DispatchService(
             repository=repo,
+            events=_EventRepo(),
             gateway=gateway,
+            health=HealthStore(),
             batch_size=10,
+            event_batch_size=50,
             retention_ttl=timedelta(days=7),
             mass_rejection_sample=10,
             quarantine_after_attempts=3,
         ),
-        settings=DispatchSettings(interval=0.05, tick_deadline=8.0),
+        settings=DispatchSettings(interval=0.05),
         heartbeat_max_silence=60.0,
     )
 

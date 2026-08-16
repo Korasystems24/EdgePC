@@ -1,7 +1,7 @@
 import shutil
 from pathlib import Path
 
-from src.domain.exceptions import TelemetryStorageError
+from src.domain.exceptions import StorageError
 from src.domain.ports.storage_monitor import StorageMonitor
 
 
@@ -13,6 +13,6 @@ class FilesystemStorageMonitor(StorageMonitor):
         try:
             return shutil.disk_usage(self._path).free
         except OSError as e:
-            raise TelemetryStorageError(
+            raise StorageError(
                 f"Не удалось прочитать свободное место для {self._path}: {e}"
             ) from e

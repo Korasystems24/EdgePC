@@ -9,7 +9,7 @@ from src.domain.value_objects.beam import Beam
 
 
 class MockRadarAdapter(RadarAdapter):
-    def __init__(self, delay: int, fail: float) -> None:
+    def __init__(self, delay: float, fail: float) -> None:
         self.delay = delay
         self.fail = fail
 

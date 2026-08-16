@@ -1,11 +1,8 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
-
-@dataclass(frozen=True)
-class FatalError:
-    reason: str
-    restartable: bool
+from src.domain.value_objects.fatal_error import FatalError
 
 
 @dataclass(frozen=True)
@@ -25,5 +22,14 @@ class Worker(Protocol):
 
     @property
     def last_heartbeat(self) -> float: ...
+
+    @property
+    def last_error(self) -> str | None: ...
+
+    @property
+    def last_error_at(self) -> datetime | None: ...
+
+    @property
+    def storage_paused(self) -> bool: ...
 
     def is_alive(self, max_silence: float | None = None) -> bool: ...

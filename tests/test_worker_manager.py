@@ -1,12 +1,14 @@
 import asyncio
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 import pytest
 
-from src.application.ports.worker import FatalError
 from src.application.worker_manager import WorkerManager
+from src.domain.value_objects.worker_health import WorkerHealth
 from src.domain.exceptions import WorkerAlreadyRunning, WorkerRestartStuck
+from src.domain.value_objects.fatal_error import FatalError
 
 
 class _FakeWorker:
@@ -27,6 +29,9 @@ class _FakeWorker:
         self._running = False
         self.fatal_error: FatalError | None = None
         self.last_heartbeat: float = 0.0
+        self.last_error: str | None = None
+        self.last_error_at: datetime | None = None
+        self.storage_paused = False
         self.start_calls = 0
         self.stop_calls = 0
 
@@ -276,3 +281,36 @@ async def test_restart_respawns_finished_worker() -> None:
     assert manager.task_state("dispatch").done is False
 
     await manager.stop_all(timeout=1)
+
+
+async def test_health_report_maps_alive_error_and_fatal() -> None:
+    ingestion_factory, ingestion = _tracking("ingestion")
+    dispatch_factory, dispatch = _tracking("dispatch")
+    manager = WorkerManager(
+        {"ingestion": ingestion_factory, "dispatch": dispatch_factory}
+    )
+    manager.start_all()
+    await ingestion[0].wait_started()
+    await dispatch[0].wait_started()
+
+    at = datetime(2026, 8, 16, 9, 28, tzinfo=UTC)
+    dispatch[0].last_error = "dispatch misconfigured"
+    dispatch[0].last_error_at = at
+    dispatch[0].fatal_error = FatalError(
+        reason="dispatch misconfigured",
+        restartable=False,
+    )
+
+    report = manager.health_report()
+    assert report["ingestion"] == WorkerHealth(alive=True)
+    assert report["dispatch"] == WorkerHealth(
+        alive=True,
+        last_error="dispatch misconfigured",
+        last_error_at=at,
+        fatal=FatalError(reason="dispatch misconfigured", restartable=False),
+    )
+
+    await manager.stop_all(timeout=1)
+    stopped = manager.health_report()
+    assert stopped["ingestion"].alive is False
+    assert stopped["dispatch"].alive is False

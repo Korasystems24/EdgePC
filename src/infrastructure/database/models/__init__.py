@@ -1,5 +1,5 @@
 from .base import Base
-from .event_outbox import EventOutbox
+from .event_outbox import EventOutboxModel
 from .telemetry_packet import TelemetryPacketModel
 
-__all__ = ["Base", "EventOutbox", "TelemetryPacketModel"]
+__all__ = ["Base", "EventOutboxModel", "TelemetryPacketModel"]

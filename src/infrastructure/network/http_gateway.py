@@ -7,10 +7,13 @@ from tenacity import (
     RetryCallState,
     retry_if_exception_type,
     stop_after_attempt,
+    stop_after_delay,
     wait_random_exponential,
 )
 
 from src.config.settings import DispatchSettings
+from src.domain.entities.edge_event import EdgeEvent
+from src.domain.entities.health_snapshot import HealthSnapshot
 from src.domain.entities.telemetry_packet import TelemetryPacket
 from src.domain.exceptions import (
     DispatchMisconfigured,
@@ -21,10 +24,16 @@ from src.domain.ports.network_gateway import NetworkGateway
 
 
 class HttpGateway(NetworkGateway):
-    def __init__(self, settings: DispatchSettings, bunker_id: str) -> None:
+    def __init__(
+        self,
+        settings: DispatchSettings,
+        bunker_id: str,
+        *,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
         self._settings = settings
         self._bunker_id = bunker_id
-        self._client = httpx.AsyncClient(
+        self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(
                 connect=settings.connect_timeout,
                 read=settings.read_timeout,
@@ -33,9 +42,57 @@ class HttpGateway(NetworkGateway):
             )
         )
 
-    async def send_batch(self, packets: list[TelemetryPacket]) -> None:
+    async def send_telemetry(self, packets: list[TelemetryPacket]) -> None:
+        await self._post_with_retry(
+            "telemetry",
+            {
+                "bunker_id": self._bunker_id,
+                "packets": [packet.model_dump(mode="json") for packet in packets],
+            },
+        )
+
+    async def send_telemetry_once(self, packets: list[TelemetryPacket]) -> None:
+        await self._post_json(
+            "telemetry",
+            {
+                "bunker_id": self._bunker_id,
+                "packets": [packet.model_dump(mode="json") for packet in packets],
+            },
+        )
+
+    async def send_events(self, events: list[EdgeEvent]) -> None:
+        await self._post_with_retry(
+            "events",
+            {
+                "bunker_id": self._bunker_id,
+                "events": [event.model_dump(mode="json") for event in events],
+            },
+        )
+
+    async def send_health(self, snapshot: HealthSnapshot) -> None:
+        await self._post_json(
+            "health",
+            {
+                "bunker_id": self._bunker_id,
+                **snapshot.model_dump(mode="json"),
+            },
+        )
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+    def _url(self, path: str) -> str:
+        return f"{self._settings.server_url.rstrip('/')}/{path.lstrip('/')}"
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._settings.auth_token.get_secret_value()}",
+        }
+
+    async def _post_with_retry(self, path: str, payload: dict[str, Any]) -> None:
         async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(self._settings.retry_attempts),
+            stop=stop_after_attempt(self._settings.retry_attempts)
+            | stop_after_delay(self._settings.retrying_send_budget),
             wait=wait_random_exponential(
                 multiplier=1,
                 max=self._settings.retry_wait_max,
@@ -45,25 +102,14 @@ class HttpGateway(NetworkGateway):
             reraise=True,
         ):
             with attempt:
-                await self._post_once(packets)
+                await self._post_json(path, payload)
 
-    async def close(self) -> None:
-        await self._client.aclose()
-
-    async def _post_once(self, packets: list[TelemetryPacket]) -> None:
-        payload: dict[str, str | list[dict[str, Any]]] = {
-            "bunker_id": self._bunker_id,
-            "packets": [packet.model_dump(mode="json") for packet in packets],
-        }
-        headers = {
-            "Authorization": (f"Bearer {self._settings.auth_token.get_secret_value()}"),
-        }
-
+    async def _post_json(self, path: str, payload: dict[str, Any]) -> None:
         try:
             response = await self._client.post(
-                self._settings.server_url,
+                self._url(path),
                 json=payload,
-                headers=headers,
+                headers=self._headers(),
             )
         except httpx.RequestError as exc:
             raise NetworkUnavailable(f"{type(exc).__name__}: {exc}") from exc

@@ -7,19 +7,28 @@ from loguru import logger
 
 from src.application.dispatch.service import DispatchService
 from src.application.dispatch.worker import DispatchWorker
+from src.application.health_store import HealthStore
 from src.application.ingestion.service import IngestionService
 from src.application.ingestion.worker import IngestionWorker
 from src.application.watchdog.worker import Watchdog
 from src.application.worker_manager import WorkerManager
 from src.config.settings import Settings, settings
 from src.domain.exceptions import RadarSourceHung
+from src.domain.ports.event_repository import EventRepository
+from src.domain.ports.host_metrics import HostMetrics
 from src.domain.ports.network_gateway import NetworkGateway
 from src.domain.ports.radar_adapter import RadarAdapter
+from src.domain.ports.storage_monitor import StorageMonitor
+from src.domain.ports.telemetry_repository import TelemetryRepository
 from src.infrastructure.database.base_client import DatabaseClient
+from src.infrastructure.database.repositories.event_repository import (
+    SqlAlchemyEventRepository,
+)
 from src.infrastructure.database.repositories.telemetry_repository import (
     SqlAlchemyTelemetryRepository,
 )
 from src.infrastructure.database.sqlite_client import SqliteClient
+from src.infrastructure.metrics.psutil_host_metrics import PsutilHostMetrics
 from src.infrastructure.network.factory import create_network_gateway
 from src.infrastructure.radar.factory import create_radar_adapter
 from src.infrastructure.storage.filesystem_monitor import FilesystemStorageMonitor
@@ -27,38 +36,40 @@ from src.infrastructure.storage.filesystem_monitor import FilesystemStorageMonit
 
 def _build_worker_manager(
     app_settings: Settings,
-    db_client: DatabaseClient,
     gateway: NetworkGateway,
     radar_adapter: RadarAdapter,
+    telemetry_repository: TelemetryRepository,
+    event_repository: EventRepository,
+    storage_monitor: StorageMonitor,
+    health_store: HealthStore,
 ) -> WorkerManager:
     """Сборка графа зависимостей. Новые сервисы и воркеры добавляются здесь."""
-    telemetry_repository = SqlAlchemyTelemetryRepository(db_client)
-
     ingestion_service = IngestionService(
         radar_adapter=radar_adapter,
         repository=telemetry_repository,
     )
-    storage_monitor = FilesystemStorageMonitor(path=app_settings.db.dir)
 
     def ingestion_factory() -> IngestionWorker:
         return IngestionWorker(
             name="ingestion",
             service=ingestion_service,
+            settings=app_settings.ingestion,
             storage_monitor=storage_monitor,
-            interval=app_settings.wcf.ingestion_interval,
-            tick_deadline=app_settings.wcf.tick_deadline,
-            min_free_bytes=app_settings.db.min_free_bytes,
-            resume_free_bytes=app_settings.db.resume_free_bytes,
+            event_repository=event_repository,
             heartbeat_max_silence=app_settings.heartbeat_max_silence,
         )
 
     dispatch_service = DispatchService(
         repository=telemetry_repository,
+        events=event_repository,
         gateway=gateway,
+        health=health_store,
         batch_size=app_settings.dispatch.batch_size,
+        event_batch_size=app_settings.dispatch.event_batch_size,
         retention_ttl=app_settings.dispatch.retention_ttl,
         mass_rejection_sample=app_settings.dispatch.mass_rejection_sample,
         quarantine_after_attempts=app_settings.dispatch.quarantine_after_attempts,
+        events_timeout=app_settings.dispatch.events_send_timeout,
     )
 
     def dispatch_factory() -> DispatchWorker:
@@ -78,13 +89,24 @@ def _build_worker_manager(
     )
 
 
-def _build_watchdog(manager: WorkerManager, app_settings: Settings) -> Watchdog:
-    watchdog_settings = app_settings.watchdog
+def _build_watchdog(
+    manager: WorkerManager,
+    app_settings: Settings,
+    *,
+    events: EventRepository,
+    telemetry: TelemetryRepository,
+    storage: StorageMonitor,
+    host_metrics: HostMetrics,
+    health: HealthStore,
+) -> Watchdog:
     return Watchdog(
         manager,
-        interval=watchdog_settings.interval,
-        restart_limit=watchdog_settings.restart_limit,
-        restart_window_seconds=watchdog_settings.restart_window_seconds,
+        events=events,
+        telemetry=telemetry,
+        storage=storage,
+        host_metrics=host_metrics,
+        health=health,
+        settings=app_settings.watchdog,
     )
 
 
@@ -165,7 +187,7 @@ def _exit_if_source_hung(radar_adapter: RadarAdapter | None) -> None:
         logger.bind(name="bootstrap").warning(
             "Источник не вернул управление после shutdown, принудительный выход"
         )
-        os._exit(0)
+        os._exit(1)
 
 
 def on_watchdog_task_done(task: asyncio.Task[None]) -> None:
@@ -195,16 +217,46 @@ async def bootstrap_application(app_settings: Settings = settings) -> None:
     watchdog_task: asyncio.Task[None] | None = None
     try:
         db_client = SqliteClient(url=app_settings.db.url)
-        radar_adapter = create_radar_adapter(app_settings)
-        gateway = create_network_gateway(app_settings)
+        radar_adapter = create_radar_adapter(
+            app_settings.radar_source,
+            wcf=app_settings.wcf,
+            mock=app_settings.mock_radar,
+        )
+        gateway = create_network_gateway(
+            app_settings.network_gateway,
+            dispatch=app_settings.dispatch,
+            mock=app_settings.mock_gateway,
+            bunker_id=app_settings.bunker_id,
+        )
         await db_client.init_database()
         if stop.is_set():
             log.info("Получен сигнал остановки до запуска воркеров")
             return
-        manager = _build_worker_manager(app_settings, db_client, gateway, radar_adapter)
+        telemetry_repository = SqlAlchemyTelemetryRepository(db_client)
+        event_repository = SqlAlchemyEventRepository(db_client)
+        storage_monitor = FilesystemStorageMonitor(path=app_settings.db.dir)
+        health_store = HealthStore()
+        host_metrics = PsutilHostMetrics(app_settings.db.dir)
+        manager = _build_worker_manager(
+            app_settings,
+            gateway,
+            radar_adapter,
+            telemetry_repository,
+            event_repository,
+            storage_monitor,
+            health_store,
+        )
         manager.start_all()
         await asyncio.sleep(0)
-        watchdog = _build_watchdog(manager, app_settings)
+        watchdog = _build_watchdog(
+            manager,
+            app_settings,
+            events=event_repository,
+            telemetry=telemetry_repository,
+            storage=storage_monitor,
+            host_metrics=host_metrics,
+            health=health_store,
+        )
         watchdog_task = asyncio.create_task(watchdog.start(), name="watchdog")
         watchdog_task.add_done_callback(on_watchdog_task_done)
         await stop.wait()

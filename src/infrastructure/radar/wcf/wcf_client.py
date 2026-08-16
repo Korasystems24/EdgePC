@@ -28,11 +28,16 @@ class WCFClient:
         self._session.close()
 
     def initialize(self) -> None:
-
+        if self._client is not None:
+            return
         self._client = Client(
             wsdl=self.wsdl_url,
             transport=self._transport,
         )
+
+    @property
+    def is_initialized(self) -> bool:
+        return self._client is not None
 
     @property
     def client(self) -> ZeepClientProtocol:
