@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import CancelledError as FuturesCancelledError
 from concurrent.futures import Future, ThreadPoolExecutor
 
 from pydantic_core import ValidationError
@@ -7,7 +8,7 @@ from zeep.exceptions import Error as ZeepError
 
 import src.domain.exceptions
 from src.domain.entities.telemetry_packet import TelemetryPacket
-from src.domain.exceptions import RadarSourceHung
+from src.domain.exceptions import RadarSourceError, RadarSourceHung
 from src.domain.ports.radar_adapter import RadarAdapter
 from src.infrastructure.radar.wcf.dto import WCFDataDTO, WCFVesselDTO
 from src.infrastructure.radar.wcf.exceptions import (
@@ -37,10 +38,11 @@ class WCFRadarAdapter(RadarAdapter):
             )
 
     def _ensure_ready(self) -> None:
+        if not self._client.is_initialized:
+            self._client.initialize()
         if self._park_name is not None and self._vessel_name is not None:
             return
 
-        self._client.initialize()
         park_name, vessel_name = WCFResourceSelector(self._client).select()
         self._park_name = park_name
         self._vessel_name = vessel_name
@@ -61,6 +63,10 @@ class WCFRadarAdapter(RadarAdapter):
     async def read_packet(self) -> TelemetryPacket:
         try:
             return await self._read_packet_in_executor()
+        except asyncio.CancelledError:
+            raise
+        except FuturesCancelledError:
+            raise
         except ClientNotInitialized as e:
             raise src.domain.exceptions.RadarSourceUnavailable(str(e)) from e
         except (RequestException, ZeepError) as e:
@@ -74,6 +80,12 @@ class WCFRadarAdapter(RadarAdapter):
         except (ValidationError, ValueRadarError) as e:
             raise src.domain.exceptions.RadarDataInvalid(
                 f"Некорректные данные от WCF: {e}"
+            ) from e
+        except RadarSourceError:
+            raise
+        except Exception as e:
+            raise src.domain.exceptions.RadarSourceUnavailable(
+                f"неожиданная ошибка источника: {e}"
             ) from e
 
     async def _read_packet_in_executor(self) -> TelemetryPacket:

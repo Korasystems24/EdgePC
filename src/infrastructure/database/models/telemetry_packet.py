@@ -20,6 +20,8 @@ class TelemetryPacketModel(
 ):
     __tablename__ = "telemetry_packet"
 
+    __event_id_unique__ = True
+
     ts: Mapped[datetime] = mapped_column(
         UTCDateTime(),
         index=True,

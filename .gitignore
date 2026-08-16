@@ -4,4 +4,5 @@ __pycache__
 .env
 *.log
 data
-docs/implementation-guide.md
+docs/
+.pytest_cache

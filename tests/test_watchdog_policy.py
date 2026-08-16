@@ -1,6 +1,6 @@
 import pytest
 
-from src.application.ports.worker import FatalError
+from src.domain.value_objects.fatal_error import FatalError
 from src.application.watchdog.policy import decide
 from src.domain.enum import WatchdogAction
 

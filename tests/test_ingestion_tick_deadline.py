@@ -6,8 +6,11 @@ from datetime import datetime
 
 from src.application.ingestion.service import IngestionService
 from src.application.ingestion.worker import IngestionWorker
+from src.config.settings import IngestionSettings
+from src.domain.entities.edge_event import EdgeEvent
 from src.domain.entities.telemetry_packet import TelemetryPacket
 from src.domain.exceptions import RadarSourceHung
+from src.domain.ports.event_repository import EventRepository, StoredEvent
 from src.domain.ports.radar_adapter import RadarAdapter
 from src.domain.ports.storage_monitor import StorageMonitor
 from src.domain.ports.telemetry_repository import StoredPacket, TelemetryRepository
@@ -71,14 +74,25 @@ class _FakeRepository(TelemetryRepository):
         return 0
 
 
+class _FakeEvents(EventRepository):
+    async def save(self, event: EdgeEvent) -> None:
+        return None
+
+    async def get_pending(self, limit: int) -> list[StoredEvent]:
+        return []
+
+    async def set_sent(self, ids: list[int]) -> None:
+        return None
+
+
 async def test_hung_blocking_read_sets_restartable_fatal_and_does_not_call_twice() -> None:
     adapter = _HungRadarAdapter()
     worker = IngestionWorker(
         name="ingestion",
         service=IngestionService(radar_adapter=adapter, repository=_FakeRepository()),
+        settings=IngestionSettings(interval=0.05, tick_deadline=0.2),
         storage_monitor=_FakeStorage(),
-        interval=0.05,
-        tick_deadline=0.2,
+        event_repository=_FakeEvents(),
     )
     task = asyncio.create_task(worker.start())
     try:
@@ -110,9 +124,9 @@ async def test_cooperative_async_timeout_is_ordinary_failure_not_fatal() -> None
     worker = IngestionWorker(
         name="ingestion",
         service=IngestionService(radar_adapter=adapter, repository=_FakeRepository()),
+        settings=IngestionSettings(interval=0.05, tick_deadline=0.15),
         storage_monitor=_FakeStorage(),
-        interval=0.05,
-        tick_deadline=0.15,
+        event_repository=_FakeEvents(),
     )
     task = asyncio.create_task(worker.start())
     try:

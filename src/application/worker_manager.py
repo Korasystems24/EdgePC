@@ -1,13 +1,12 @@
 import asyncio
 import time
-from collections.abc import Callable
 
 from loguru import logger
 
 from src.application.ports.worker import TaskState, Worker
+from src.application.types import WorkerFactory
 from src.domain.exceptions import WorkerAlreadyRunning, WorkerRestartStuck
-
-WorkerFactory = Callable[[], Worker]
+from src.domain.value_objects.worker_health import WorkerHealth
 
 
 class WorkerManager:
@@ -104,8 +103,20 @@ class WorkerManager:
                 task.get_name(),
             )
 
-    def health_report(self) -> dict[str, bool]:
-        return {name: worker.is_alive() for name, worker in self._workers.items()}
+    def health_report(self) -> dict[str, WorkerHealth]:
+        return {
+            name: self._worker_health(worker)
+            for name, worker in self._workers.items()
+        }
+
+    @staticmethod
+    def _worker_health(worker: Worker) -> WorkerHealth:
+        return WorkerHealth(
+            alive=worker.is_alive(),
+            last_error=worker.last_error,
+            last_error_at=worker.last_error_at,
+            fatal=worker.fatal_error,
+        )
 
     def _on_task_done(self, task: asyncio.Task[None]) -> None:
         if task.cancelled():

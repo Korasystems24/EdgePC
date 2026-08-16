@@ -1,5 +1,5 @@
-from src.application.ports.worker import FatalError
 from src.domain.enum import WatchdogAction
+from src.domain.value_objects.fatal_error import FatalError
 
 
 def decide(

@@ -2,19 +2,20 @@ import asyncio
 import time
 
 from src.application.ingestion.service import IngestionService
-from src.application.ports.worker import FatalError
 from src.application.tick_worker import TickWorker
+from src.config.settings import IngestionSettings
+from src.domain.constants import BYTES_IN_MIB
+from src.domain.entities.edge_event import EdgeEvent
 from src.domain.exceptions import (
     RadarDataInvalid,
     RadarSourceHung,
     RadarSourceMisconfigured,
     RadarSourceUnavailable,
-    TelemetryStorageError,
+    StorageError,
 )
+from src.domain.ports.event_repository import EventRepository
 from src.domain.ports.storage_monitor import StorageMonitor
-
-_MIB = 1024 * 1024
-_STORAGE_LOG_INTERVAL_S = 60.0
+from src.domain.value_objects.fatal_error import FatalError
 
 
 class IngestionWorker(TickWorker):
@@ -22,25 +23,23 @@ class IngestionWorker(TickWorker):
         self,
         name: str,
         service: IngestionService,
+        settings: IngestionSettings,
         storage_monitor: StorageMonitor,
-        interval: float = 5.0,
-        tick_deadline: float = 8.0,
-        min_free_bytes: int = 200 * _MIB,
-        resume_free_bytes: int = 250 * _MIB,
+        event_repository: EventRepository,
         heartbeat_max_silence: float = 60.0,
     ) -> None:
         super().__init__(
             name=name,
-            interval=interval,
+            interval=settings.interval,
             heartbeat_max_silence=heartbeat_max_silence,
         )
         self._service = service
+        self._settings = settings
         self._storage_monitor = storage_monitor
-        self._tick_deadline = tick_deadline
-        self._min_free_bytes = min_free_bytes
-        self._resume_free_bytes = resume_free_bytes
+        self._events = event_repository
         self._storage_paused = False
-        self._last_storage_log_at: float = 0.0
+        self._radar_down = False
+        self._radar_down_since: float = 0.0
 
     @property
     def storage_paused(self) -> bool:
@@ -50,7 +49,7 @@ class IngestionWorker(TickWorker):
         try:
             if not self._storage_allows_write():
                 return
-        except TelemetryStorageError as e:
+        except StorageError as e:
             self._consecutive_failures += 1
             self._log_tick_failure(
                 "error",
@@ -60,30 +59,20 @@ class IngestionWorker(TickWorker):
             return
 
         try:
-            async with asyncio.timeout(self._tick_deadline):
+            async with asyncio.timeout(self._settings.tick_deadline):
                 await self._service.collect_once()
-            self._reset_failures()
+                await self._on_success()
         except TimeoutError:
             self._on_tick_deadline_exceeded()
         except RadarSourceUnavailable as e:
-            self._consecutive_failures += 1
-            self._log_tick_failure("warning", "Источник недоступен: {}", e)
+            await self._on_source_unavailable(e)
         except RadarSourceMisconfigured as e:
-            self._log.critical(
-                "Требуется вмешательство в конфигурацию, остановка воркера: {}", e
-            )
-            self._fatal_error = FatalError(
-                reason=str(e) or "radar source misconfigured",
-                restartable=False,
-            )
-            self._running = False
-        except TelemetryStorageError as e:
+            self._stop_misconfigured(e, fallback="radar source misconfigured")
+        except StorageError as e:
             self._consecutive_failures += 1
             self._log_tick_failure("error", "Пакет собран, но не сохранён: {}", e)
         except RadarDataInvalid as e:
-            self._log.warning(
-                "Некорректные данные, пропуск тика: {}", e
-            )
+            self._log.warning("Некорректные данные, пропуск тика: {}", e)
 
     def _on_tick_deadline_exceeded(self) -> None:
         try:
@@ -92,43 +81,69 @@ class IngestionWorker(TickWorker):
             self._log.critical(
                 "Чтение источника пережило дедлайн тика, остановка воркера: {}", e
             )
-            self._fatal_error = FatalError(reason=str(e), restartable=True)
-            self._running = False
+            self._set_fatal_error(FatalError(reason=str(e), restartable=True))
             return
 
         self._consecutive_failures += 1
         self._log_tick_failure("error", "Тик превысил дедлайн")
 
+    async def _on_source_unavailable(self, error: RadarSourceUnavailable) -> None:
+        self._consecutive_failures += 1
+        self._log_tick_failure("warning", "Источник недоступен: {}", error)
+        if self._radar_down:
+            return
+        try:
+            await self._events.save(EdgeEvent.radar_down(reason=str(error)))
+        except StorageError as e:
+            self._log_tick_failure("error", "Не удалось записать radar_down: {}", e)
+            return
+        self._radar_down = True
+        self._radar_down_since = time.monotonic()
+
+    async def _on_success(self) -> None:
+        if self._radar_down:
+            downtime_seconds = time.monotonic() - self._radar_down_since
+            try:
+                await self._events.save(
+                    EdgeEvent.radar_recovered(downtime_seconds=downtime_seconds)
+                )
+            except StorageError as e:
+                self._consecutive_failures += 1
+                self._log_tick_failure(
+                    "error",
+                    "Не удалось записать radar_recovered: {}",
+                    e,
+                )
+                return
+            self._radar_down = False
+            self._radar_down_since = 0.0
+        self._reset_failures()
+
     def _storage_allows_write(self) -> bool:
         free_bytes = self._storage_monitor.free_bytes()
         if self._storage_paused:
-            if free_bytes >= self._resume_free_bytes:
+            if free_bytes >= self._settings.resume_free_bytes:
                 self._storage_paused = False
-                self._last_storage_log_at = 0.0
+                self._clear_log_throttle("storage")
                 self._log.info(
                     "Свободное место восстановлено ({} MiB), сбор возобновлён",
-                    free_bytes // _MIB,
+                    free_bytes // BYTES_IN_MIB,
                 )
                 return True
             self._log_storage_paused(free_bytes)
             return False
-        if free_bytes < self._min_free_bytes:
+        if free_bytes < self._settings.min_free_bytes:
             self._storage_paused = True
             self._log_storage_paused(free_bytes)
             return False
         return True
 
     def _log_storage_paused(self, free_bytes: int) -> None:
-        now = time.monotonic()
-        if (
-            self._last_storage_log_at != 0.0
-            and now - self._last_storage_log_at < _STORAGE_LOG_INTERVAL_S
-        ):
+        if not self._should_log("storage"):
             return
-        self._last_storage_log_at = now
         self._log.error(
             "Недостаточно места на диске БД (свободно {} MiB, пауза ниже {} MiB), "
             "чтение пакета пропущено; pending не удаляются",
-            free_bytes // _MIB,
-            self._min_free_bytes // _MIB,
+            free_bytes // BYTES_IN_MIB,
+            self._settings.min_free_mb,
         )

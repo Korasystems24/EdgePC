@@ -8,7 +8,6 @@ class RadarAdapter(ABC):
     async def read_packet(self) -> TelemetryPacket: ...
 
     def raise_if_hung(self) -> None:
-        """Бросить RadarSourceHung, если чтение ещё блокирует границу после отмены ожидания."""
         return None
 
     async def close(self) -> None:

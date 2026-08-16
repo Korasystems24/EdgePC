@@ -1,16 +1,20 @@
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from loguru import logger
+from pydantic import ValidationError
 from sqlalchemy import ColumnElement, CursorResult, delete, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domain.entities.edge_event import EdgeEvent
 from src.domain.entities.telemetry_packet import TelemetryPacket
 from src.domain.exceptions import TelemetryStorageError
 from src.domain.ports.telemetry_repository import StoredPacket, TelemetryRepository
 from src.infrastructure.database.base_client import DatabaseClient
+from src.infrastructure.database.mapping.event_mapper import EventOutboxMapper
 from src.infrastructure.database.mapping.telemetry_mapper import TelemetryPacketMapper
-from src.infrastructure.database.models import EventOutbox, TelemetryPacketModel
+from src.infrastructure.database.models import TelemetryPacketModel
 
 
 class SqlAlchemyTelemetryRepository(TelemetryRepository):
@@ -42,21 +46,68 @@ class SqlAlchemyTelemetryRepository(TelemetryRepository):
         """Взять пачку ещё не отправленных."""
         try:
             async with self._db_client.session() as session:
-                result = await session.execute(
-                    select(TelemetryPacketModel)
-                    .where(*self._pending_filter())
-                    .order_by(TelemetryPacketModel.id)
-                    .limit(limit)
-                )
-                models = result.scalars().all()
-                return [
-                    StoredPacket(id=model.id, packet=self._mapper.to_domain(model))
-                    for model in models
-                ]
+                pending: list[StoredPacket] = []
+                processed_ids: list[int] = []
+                quarantined = False
+                while len(pending) < limit:
+                    query = (
+                        select(TelemetryPacketModel)
+                        .where(*self._pending_filter())
+                        .order_by(TelemetryPacketModel.id)
+                        .limit(limit - len(pending))
+                    )
+                    if processed_ids:
+                        query = query.where(
+                            TelemetryPacketModel.id.notin_(processed_ids)
+                        )
+                    result = await session.execute(query)
+                    models = result.scalars().all()
+                    if not models:
+                        break
+                    quarantined_this_batch = False
+                    for model in models:
+                        processed_ids.append(model.id)
+                        try:
+                            pending.append(
+                                StoredPacket(
+                                    id=model.id,
+                                    packet=self._mapper.to_domain(model),
+                                )
+                            )
+                        except (ValidationError, TypeError, ValueError) as e:
+                            logger.error(
+                                "Карантин битого пакета id={}: {}",
+                                model.id,
+                                e,
+                            )
+                            self._quarantine_corrupt(session, model)
+                            quarantined_this_batch = True
+                            quarantined = True
+                    if quarantined_this_batch:
+                        await session.flush()
+                    else:
+                        break
+                if quarantined:
+                    await session.commit()
+                return pending
         except SQLAlchemyError as e:
             raise TelemetryStorageError(
                 f"Не удалось получить ожидающие пакеты: {e}"
             ) from e
+
+    @staticmethod
+    def _quarantine_corrupt(
+        session: AsyncSession, model: TelemetryPacketModel
+    ) -> None:
+        now = datetime.now(UTC)
+        model.attempts += 1
+        model.quarantined_at = now
+        quarantine_event: EdgeEvent = EdgeEvent.packet_quarantined(
+            telemetry_packet_id=model.id,
+            telemetry_packet_event_id=model.event_id,
+            attempts=model.attempts,
+        )
+        session.add(EventOutboxMapper.to_model(quarantine_event))
 
     async def get_pending_count(self) -> int:
         """Сколько ещё ждёт отправки."""
@@ -131,13 +182,7 @@ class SqlAlchemyTelemetryRepository(TelemetryRepository):
                             telemetry_packet_event_id=model.event_id,
                             attempts=model.attempts,
                         )
-                        session.add(
-                            EventOutbox(
-                                event_id=quarantine_event.event_id,
-                                type=quarantine_event.type,
-                                payload=quarantine_event.payload_as_dict(),
-                            )
-                        )
+                        session.add(EventOutboxMapper.to_model(quarantine_event))
 
                 await session.commit()
         except SQLAlchemyError as e:

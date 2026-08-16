@@ -1,72 +1,48 @@
 import uuid
-from typing import Any, Self, TypedDict
+from typing import Self
 
 import pydantic
+from pydantic import model_validator
 
+from src.domain.constants import PAYLOAD_BY_TYPE
 from src.domain.enum import EdgeEventType
-
-
-class RadarDownPayload(TypedDict):
-    """Радар/WCF стал недоступен (один раз на вход в DOWN)."""
-
-    reason: str
-
-
-class RadarRecoveredPayload(TypedDict):
-    """Первый успешный опрос после простоя."""
-
-    downtime_seconds: float
-
-
-class PacketQuarantinedPayload(TypedDict):
-    """Пакет исключён из автоматической отправки."""
-
-    telemetry_packet_id: int
-    telemetry_packet_event_id: str
-    attempts: int
-
-
-class WorkerRestartedPayload(TypedDict):
-    """Watchdog перезапустил воркер."""
-
-    worker: str
-
-
-class FatalErrorPayload(TypedDict):
-    """Воркер признал, что не может продолжать."""
-
-    worker: str
-    reason: str
-    restartable: bool
-
-
-type EdgeEventPayload = (
-    RadarDownPayload
-    | RadarRecoveredPayload
-    | PacketQuarantinedPayload
-    | WorkerRestartedPayload
-    | FatalErrorPayload
+from src.domain.value_objects.event_payload import (
+    PacketQuarantined,
+    RadarDown,
+    RadarRecovered,
+    WorkerFatal,
+    WorkerRestarted,
 )
+from src.domain.value_objects.types import EdgeEventPayload
 
 
 class EdgeEvent(pydantic.BaseModel):
-    """Операционное событие для event_outbox → POST /events."""
-
     model_config = pydantic.ConfigDict(frozen=True)
 
     event_id: uuid.UUID = pydantic.Field(default_factory=uuid.uuid4)
     type: EdgeEventType
     payload: EdgeEventPayload
 
+    @model_validator(mode="after")
+    def _payload_matches_type(self) -> Self:
+        expected = PAYLOAD_BY_TYPE[self.type]
+        if type(self.payload) is not expected:
+            raise ValueError(
+                f"{self.type} ожидает {expected.__name__}, "
+                f"получен {type(self.payload).__name__}"
+            )
+        return self
+
     @classmethod
     def radar_down(cls, *, reason: str) -> Self:
-        payload: RadarDownPayload = {"reason": reason}
-        return cls(type=EdgeEventType.RADAR_DOWN, payload=payload)
+        return cls(type=EdgeEventType.RADAR_DOWN, payload=RadarDown(reason=reason))
 
     @classmethod
     def radar_recovered(cls, *, downtime_seconds: float) -> Self:
-        payload: RadarRecoveredPayload = {"downtime_seconds": downtime_seconds}
-        return cls(type=EdgeEventType.RADAR_RECOVERED, payload=payload)
+        return cls(
+            type=EdgeEventType.RADAR_RECOVERED,
+            payload=RadarRecovered(downtime_seconds=downtime_seconds),
+        )
 
     @classmethod
     def packet_quarantined(
@@ -76,27 +52,29 @@ class EdgeEvent(pydantic.BaseModel):
         telemetry_packet_event_id: uuid.UUID,
         attempts: int,
     ) -> Self:
-        payload: PacketQuarantinedPayload = {
-            "telemetry_packet_id": telemetry_packet_id,
-            "telemetry_packet_event_id": str(telemetry_packet_event_id),
-            "attempts": attempts,
-        }
-        return cls(type=EdgeEventType.PACKET_QUARANTINED, payload=payload)
+        return cls(
+            type=EdgeEventType.PACKET_QUARANTINED,
+            payload=PacketQuarantined(
+                telemetry_packet_id=telemetry_packet_id,
+                telemetry_packet_event_id=telemetry_packet_event_id,
+                attempts=attempts,
+            ),
+        )
 
     @classmethod
     def worker_restarted(cls, *, worker: str) -> Self:
-        payload: WorkerRestartedPayload = {"worker": worker}
-        return cls(type=EdgeEventType.WORKER_RESTARTED, payload=payload)
+        return cls(
+            type=EdgeEventType.WORKER_RESTARTED,
+            payload=WorkerRestarted(worker=worker),
+        )
 
     @classmethod
     def fatal_error(cls, *, worker: str, reason: str, restartable: bool) -> Self:
-        payload: FatalErrorPayload = {
-            "worker": worker,
-            "reason": reason,
-            "restartable": restartable,
-        }
-        return cls(type=EdgeEventType.FATAL_ERROR, payload=payload)
-
-    def payload_as_dict(self) -> dict[str, Any]:
-        """Для ORM/JSON-колонки, где нужен обычный dict."""
-        return dict(self.payload)
+        return cls(
+            type=EdgeEventType.FATAL_ERROR,
+            payload=WorkerFatal(
+                worker=worker,
+                reason=reason,
+                restartable=restartable,
+            ),
+        )
