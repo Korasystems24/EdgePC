@@ -20,6 +20,13 @@ class EdgeEventType(StrEnum):
     FATAL_ERROR = "fatal_error"
 
 
+class WatchdogAction(StrEnum):
+    KEEP = "keep"
+    RESTART = "restart"
+    LEAVE_STOPPED = "leave_stopped"
+    EXIT = "exit"
+
+
 class BeamStatus(StrEnum):
     FAULT = "Fault"
     LENGTH_SIMULATED = "LengthSimulated"

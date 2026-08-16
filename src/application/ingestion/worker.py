@@ -27,13 +27,11 @@ class IngestionWorker(TickWorker):
         tick_deadline: float = 8.0,
         min_free_bytes: int = 200 * _MIB,
         resume_free_bytes: int = 250 * _MIB,
-        max_consecutive_failures: int = 10,
-        heartbeat_max_silence: float = 30.0,
+        heartbeat_max_silence: float = 60.0,
     ) -> None:
         super().__init__(
             name=name,
             interval=interval,
-            max_consecutive_failures=max_consecutive_failures,
             heartbeat_max_silence=heartbeat_max_silence,
         )
         self._service = service
@@ -54,10 +52,9 @@ class IngestionWorker(TickWorker):
                 return
         except TelemetryStorageError as e:
             self._consecutive_failures += 1
-            self._log.error(
-                "Не удалось проверить свободное место ({}/{}): {}",
-                self._consecutive_failures,
-                self._max_consecutive_failures,
+            self._log_tick_failure(
+                "error",
+                "Не удалось проверить свободное место: {}",
                 e,
             )
             return
@@ -65,17 +62,12 @@ class IngestionWorker(TickWorker):
         try:
             async with asyncio.timeout(self._tick_deadline):
                 await self._service.collect_once()
-            self._consecutive_failures = 0
+            self._reset_failures()
         except TimeoutError:
             self._on_tick_deadline_exceeded()
         except RadarSourceUnavailable as e:
             self._consecutive_failures += 1
-            self._log.warning(
-                "Источник недоступен ({}/{}): {}",
-                self._consecutive_failures,
-                self._max_consecutive_failures,
-                e,
-            )
+            self._log_tick_failure("warning", "Источник недоступен: {}", e)
         except RadarSourceMisconfigured as e:
             self._log.critical(
                 "Требуется вмешательство в конфигурацию, остановка воркера: {}", e
@@ -87,12 +79,7 @@ class IngestionWorker(TickWorker):
             self._running = False
         except TelemetryStorageError as e:
             self._consecutive_failures += 1
-            self._log.error(
-                "Пакет собран, но не сохранён ({}/{}): {}",
-                self._consecutive_failures,
-                self._max_consecutive_failures,
-                e,
-            )
+            self._log_tick_failure("error", "Пакет собран, но не сохранён: {}", e)
         except RadarDataInvalid as e:
             self._log.warning(
                 "Некорректные данные, пропуск тика: {}", e
@@ -110,11 +97,7 @@ class IngestionWorker(TickWorker):
             return
 
         self._consecutive_failures += 1
-        self._log.error(
-            "Тик превысил дедлайн ({}/{})",
-            self._consecutive_failures,
-            self._max_consecutive_failures,
-        )
+        self._log_tick_failure("error", "Тик превысил дедлайн")
 
     def _storage_allows_write(self) -> bool:
         free_bytes = self._storage_monitor.free_bytes()
@@ -137,7 +120,10 @@ class IngestionWorker(TickWorker):
 
     def _log_storage_paused(self, free_bytes: int) -> None:
         now = time.monotonic()
-        if now - self._last_storage_log_at < _STORAGE_LOG_INTERVAL_S:
+        if (
+            self._last_storage_log_at != 0.0
+            and now - self._last_storage_log_at < _STORAGE_LOG_INTERVAL_S
+        ):
             return
         self._last_storage_log_at = now
         self._log.error(

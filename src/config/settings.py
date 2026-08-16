@@ -98,20 +98,48 @@ class DispatchSettings(BaseModel):
         return self
 
 
+class WatchdogSettings(BaseModel):
+    """Настройки надзора за воркерами."""
+
+    interval: float = Field(default=5.0, gt=0)
+    restart_limit: int = Field(default=3, gt=0)
+    restart_window_seconds: float = Field(default=600.0, gt=0)
+
+
 class Settings(BaseSettings):
     debug: bool = True
     bunker_id: str = "bunker-001"
-    radar_source: RadarSourceType = RadarSourceType.MOCK
+    radar_source: RadarSourceType = RadarSourceType.WCF
     network_gateway: NetworkGatewayType = NetworkGatewayType.MOCK
     log_file_path: str = "prod.log"
     shutdown_timeout: float = Field(default=8.0, gt=0)
-    max_consecutive_failures: int = Field(default=10, gt=0)
-    heartbeat_max_silence: float = Field(default=30.0, gt=0)
+    restart_join_timeout: float = Field(default=5.0, gt=0)
+    heartbeat_max_silence: float = Field(default=60.0, gt=0)
 
     db: DatabaseSettings = Field(default_factory=DatabaseSettings)
     wcf: WcfSettings = Field(default_factory=WcfSettings)
     mock: MockSettings = Field(default_factory=MockSettings)
     dispatch: DispatchSettings = Field(default_factory=DispatchSettings)
+    watchdog: WatchdogSettings = Field(default_factory=WatchdogSettings)
+
+    @model_validator(mode="after")
+    def heartbeat_longer_than_ticks(self) -> Self:
+        longest_tick = max(self.wcf.tick_deadline, self.dispatch.tick_deadline)
+        if self.heartbeat_max_silence <= longest_tick:
+            raise ValueError(
+                f"heartbeat_max_silence ({self.heartbeat_max_silence}) must be > "
+                f"longest tick_deadline ({longest_tick})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def restart_join_fits_shutdown(self) -> Self:
+        if self.restart_join_timeout >= self.shutdown_timeout:
+            raise ValueError(
+                f"restart_join_timeout ({self.restart_join_timeout}) must be < "
+                f"shutdown_timeout ({self.shutdown_timeout})"
+            )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

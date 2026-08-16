@@ -20,13 +20,11 @@ class DispatchWorker(TickWorker):
         name: str,
         service: DispatchService,
         settings: DispatchSettings,
-        max_consecutive_failures: int = 10,
-        heartbeat_max_silence: float = 30.0,
+        heartbeat_max_silence: float = 60.0,
     ) -> None:
         super().__init__(
             name=name,
             interval=settings.interval,
-            max_consecutive_failures=max_consecutive_failures,
             heartbeat_max_silence=heartbeat_max_silence,
         )
         self._service = service
@@ -51,14 +49,10 @@ class DispatchWorker(TickWorker):
                 )
             elif sent:
                 self._log.info("Отправлено {} пакетов", sent)
-            self._consecutive_failures = 0
+            self._reset_failures()
         except TimeoutError:
             self._consecutive_failures += 1
-            self._log.error(
-                "Тик превысил дедлайн ({}/{})",
-                self._consecutive_failures,
-                self._max_consecutive_failures,
-            )
+            self._log_tick_failure("error", "Тик превысил дедлайн")
         except NetworkUnavailable as e:
             self._network_unavailable = True
             self._log_network_unavailable(e)
@@ -73,16 +67,14 @@ class DispatchWorker(TickWorker):
             self._running = False
         except TelemetryStorageError as e:
             self._consecutive_failures += 1
-            self._log.error(
-                "Ошибка хранилища ({}/{}): {}",
-                self._consecutive_failures,
-                self._max_consecutive_failures,
-                e,
-            )
+            self._log_tick_failure("error", "Ошибка хранилища: {}", e)
 
     def _log_network_unavailable(self, error: NetworkUnavailable) -> None:
         now = time.monotonic()
-        if now - self._last_network_log_at < _NETWORK_LOG_INTERVAL_S:
+        if (
+            self._last_network_log_at != 0.0
+            and now - self._last_network_log_at < _NETWORK_LOG_INTERVAL_S
+        ):
             return
         self._last_network_log_at = now
         self._log.warning(
