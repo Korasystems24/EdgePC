@@ -23,6 +23,14 @@ from src.infrastructure.database.models import Base
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+# Две записи SQLite всё равно сериализует, поэтому второй транзакции нужно дать
+# дождаться писателя вместо немедленного "database is locked".
+SQLITE_BUSY_TIMEOUT_MS = 5000
+
+# Durability дороже скорости: один INSERT в 5 секунд позволяет синхронизировать
+# WAL на каждом commit.
+SQLITE_SYNCHRONOUS = "FULL"
+
 
 class SqliteClient(DatabaseClient):
     def __init__(
@@ -82,8 +90,8 @@ class SqliteClient(DatabaseClient):
     ) -> None:
         cursor = dbapi_connection.cursor()
         try:
-            cursor.execute("PRAGMA synchronous=FULL;")
-            cursor.execute("PRAGMA busy_timeout=5000;")
+            cursor.execute(f"PRAGMA synchronous={SQLITE_SYNCHRONOUS};")
+            cursor.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS};")
             cursor.execute("PRAGMA foreign_keys=ON;")
         finally:
             cursor.close()

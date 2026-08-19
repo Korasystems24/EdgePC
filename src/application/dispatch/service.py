@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 
+from src.application.dispatch.rejection import RejectionIsolator
 from src.application.health_store import HealthStore
 from src.domain.entities.edge_event import EdgeEvent
 from src.domain.exceptions import (
@@ -12,10 +13,17 @@ from src.domain.exceptions import (
 )
 from src.domain.ports.event_repository import EventRepository
 from src.domain.ports.network_gateway import NetworkGateway
-from src.domain.ports.telemetry_repository import StoredPacket, TelemetryRepository
+from src.domain.ports.telemetry_repository import TelemetryRepository
 
 
 class DispatchService:
+    """Что нужно сделать за один тик отправки: health, события, телеметрия.
+
+    Порядок внутри телеметрии — гарантия «не потеряем без следа»: пометка
+    `sent_at` строго после успешной отправки. Упали между отправкой и пометкой —
+    пакеты уедут повторно, дубли гасит дедупликация на сервере.
+    """
+
     def __init__(
         self,
         repository: TelemetryRepository,
@@ -36,9 +44,14 @@ class DispatchService:
         self._batch_size = batch_size
         self._event_batch_size = event_batch_size
         self._retention_ttl = retention_ttl
-        self._mass_rejection_sample = mass_rejection_sample
-        self._quarantine_after_attempts = quarantine_after_attempts
         self._events_timeout = events_timeout
+        self._rejection = RejectionIsolator(
+            repository,
+            gateway,
+            sample_size=mass_rejection_sample,
+            quarantine_after_attempts=quarantine_after_attempts,
+        )
+        self._log = logger.bind(name="dispatch")
 
     async def dispatch_once(self) -> int:
         await self._send_health()
@@ -58,7 +71,7 @@ class DispatchService:
         except DispatchRejected as exc:
             raise DispatchMisconfigured(f"сервер отверг health-снапшот: {exc}") from exc
         except NetworkUnavailable as exc:
-            logger.warning(
+            self._log.warning(
                 "Health не ушёл, события и телеметрию всё равно отправляем: {}",
                 exc,
             )
@@ -70,12 +83,12 @@ class DispatchService:
         try:
             await self._send_events_payload([item.event for item in pending])
         except TimeoutError:
-            logger.warning(
+            self._log.warning(
                 "Events не ушли за отведённое время, телеметрию всё равно отправляем"
             )
             return
         except NetworkUnavailable as exc:
-            logger.warning(
+            self._log.warning(
                 "Events не ушли, телеметрию всё равно отправляем: {}",
                 exc,
             )
@@ -98,48 +111,6 @@ class DispatchService:
         try:
             await self._gateway.send_telemetry([item.packet for item in batch])
         except DispatchRejected:
-            sample = batch[: self._mass_rejection_sample]
-            return await self._send_rejected_sample_one_by_one(sample)
+            return await self._rejection.isolate(batch)
         await self._repository.set_sent([item.id for item in batch])
         return len(batch)
-
-    async def _send_rejected_sample_one_by_one(self, sample: list[StoredPacket]) -> int:
-
-        logger.warning(
-            "Пачка получила 422, проверяем {} пакетов по одному",
-            len(sample),
-        )
-        sent = 0
-        rejected: list[StoredPacket] = []
-        try:
-            for item in sample:
-                try:
-                    await self._gateway.send_telemetry_once([item.packet])
-                    await self._repository.set_sent([item.id])
-                    sent += 1
-                except DispatchRejected:
-                    rejected.append(item)
-        except NetworkUnavailable:
-            if rejected:
-                await self._repository.update_rejected(
-                    [item.id for item in rejected],
-                    self._quarantine_after_attempts,
-                )
-            raise
-
-        if len(sample) >= self._mass_rejection_sample and len(rejected) == len(sample):
-            raise DispatchMisconfigured(
-                f"Сервер отверг {len(rejected)} пакетов подряд, похоже сломан контракт"
-            )
-
-        await self._repository.update_rejected(
-            [item.id for item in rejected],
-            self._quarantine_after_attempts,
-        )
-        logger.warning(
-            "Сервер отверг {} пакетов, копят попытки / карантин. "
-            "Отправлено только {} пакетов",
-            len(rejected),
-            sent,
-        )
-        return sent

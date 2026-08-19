@@ -1,3 +1,4 @@
+from http import HTTPStatus
 from typing import Any
 
 import httpx
@@ -11,7 +12,7 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from src.config.settings import DispatchSettings
+from src.config.settings import HttpTransportSettings
 from src.domain.entities.edge_event import EdgeEvent
 from src.domain.entities.health_snapshot import HealthSnapshot
 from src.domain.entities.telemetry_packet import TelemetryPacket
@@ -22,11 +23,28 @@ from src.domain.exceptions import (
 )
 from src.domain.ports.network_gateway import NetworkGateway
 
+TELEMETRY_PATH = "telemetry"
+EVENTS_PATH = "events"
+HEALTH_PATH = "health"
+
+MAX_ERROR_BODY_CHARS = 300
+
+# HTTPStatus, а не httpx.codes: члены httpx объявлены парами (код, фраза), и для
+# статических проверок сравнение int с таким членом выглядит всегда ложным.
+RETRYABLE_STATUSES = frozenset({HTTPStatus.TOO_MANY_REQUESTS})
+MISCONFIGURED_STATUSES = frozenset(
+    {
+        HTTPStatus.BAD_REQUEST,
+        HTTPStatus.UNAUTHORIZED,
+        HTTPStatus.FORBIDDEN,
+    }
+)
+
 
 class HttpGateway(NetworkGateway):
     def __init__(
         self,
-        settings: DispatchSettings,
+        settings: HttpTransportSettings,
         bunker_id: str,
         *,
         client: httpx.AsyncClient | None = None,
@@ -43,26 +61,16 @@ class HttpGateway(NetworkGateway):
         )
 
     async def send_telemetry(self, packets: list[TelemetryPacket]) -> None:
-        await self._post_with_retry(
-            "telemetry",
-            {
-                "bunker_id": self._bunker_id,
-                "packets": [packet.model_dump(mode="json") for packet in packets],
-            },
-        )
+        await self._post_with_retry(TELEMETRY_PATH, self._telemetry_payload(packets))
 
     async def send_telemetry_once(self, packets: list[TelemetryPacket]) -> None:
-        await self._post_json(
-            "telemetry",
-            {
-                "bunker_id": self._bunker_id,
-                "packets": [packet.model_dump(mode="json") for packet in packets],
-            },
-        )
+        """Без ретраев: изоляция 422 шлёт пакеты по одному и должна уложиться в
+        тот же дедлайн тика, что и обычная пачка."""
+        await self._post_json(TELEMETRY_PATH, self._telemetry_payload(packets))
 
     async def send_events(self, events: list[EdgeEvent]) -> None:
         await self._post_with_retry(
-            "events",
+            EVENTS_PATH,
             {
                 "bunker_id": self._bunker_id,
                 "events": [event.model_dump(mode="json") for event in events],
@@ -71,7 +79,7 @@ class HttpGateway(NetworkGateway):
 
     async def send_health(self, snapshot: HealthSnapshot) -> None:
         await self._post_json(
-            "health",
+            HEALTH_PATH,
             {
                 "bunker_id": self._bunker_id,
                 **snapshot.model_dump(mode="json"),
@@ -80,6 +88,12 @@ class HttpGateway(NetworkGateway):
 
     async def close(self) -> None:
         await self._client.aclose()
+
+    def _telemetry_payload(self, packets: list[TelemetryPacket]) -> dict[str, Any]:
+        return {
+            "bunker_id": self._bunker_id,
+            "packets": [packet.model_dump(mode="json") for packet in packets],
+        }
 
     def _url(self, path: str) -> str:
         return f"{self._settings.server_url.rstrip('/')}/{path.lstrip('/')}"
@@ -119,17 +133,20 @@ class HttpGateway(NetworkGateway):
         self._raise_from_status(response)
 
     def _raise_from_status(self, response: httpx.Response) -> None:
-        status = response.status_code
-        body = response.text[:300]
-
-        if status == 200:
+        """Три класса ошибок сервера: повторить позже, данные плохие, нужен
+        человек. Всё, что не разобрано явно, — последний класс: молча считать
+        неизвестный ответ успехом опаснее, чем остановить отправку."""
+        if response.is_success:
             return
 
-        if status == 422:
-            logger.error("Сервер отверг данные (HTTP 422): {}", body)
-            raise DispatchRejected(f"HTTP 422: {body}")
+        status = response.status_code
+        body = response.text[:MAX_ERROR_BODY_CHARS]
 
-        if status in (400, 401, 403):
+        if status == HTTPStatus.UNPROCESSABLE_ENTITY:
+            logger.error("Сервер отверг данные (HTTP 422): {}", body)
+            raise DispatchRejected(f"HTTP {status}: {body}")
+
+        if status in MISCONFIGURED_STATUSES:
             logger.error(
                 "Конфигурация отправки отвергнута (HTTP {}): {}",
                 status,
@@ -137,7 +154,7 @@ class HttpGateway(NetworkGateway):
             )
             raise DispatchMisconfigured(f"HTTP {status}: {body}")
 
-        if status == 429 or status >= 500:
+        if status in RETRYABLE_STATUSES or response.is_server_error:
             raise NetworkUnavailable(f"HTTP {status}: {body}")
 
         logger.error("Неожиданный HTTP {}: {}", status, body)

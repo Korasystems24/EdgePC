@@ -1,11 +1,11 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Self
 
 import pydantic
 from pydantic import model_validator
 
-from src.domain.constants import PAYLOAD_BY_TYPE
-from src.domain.enum import EdgeEventType
+from src.domain.enums import EdgeEventType
 from src.domain.value_objects.event_payload import (
     PacketQuarantined,
     RadarDown,
@@ -13,13 +13,26 @@ from src.domain.value_objects.event_payload import (
     WorkerFatal,
     WorkerRestarted,
 )
-from src.domain.value_objects.types import EdgeEventPayload
+from src.domain.value_objects.types import EdgeEventPayload, Timestamp
+
+PAYLOAD_BY_TYPE: dict[EdgeEventType, type[EdgeEventPayload]] = {
+    EdgeEventType.RADAR_DOWN: RadarDown,
+    EdgeEventType.RADAR_RECOVERED: RadarRecovered,
+    EdgeEventType.PACKET_QUARANTINED: PacketQuarantined,
+    EdgeEventType.WORKER_RESTARTED: WorkerRestarted,
+    EdgeEventType.FATAL_ERROR: WorkerFatal,
+}
+
+
+def _now() -> datetime:
+    return datetime.now(tz=UTC)
 
 
 class EdgeEvent(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(frozen=True)
 
     event_id: uuid.UUID = pydantic.Field(default_factory=uuid.uuid4)
+    ts: Timestamp = pydantic.Field(default_factory=_now)
     type: EdgeEventType
     payload: EdgeEventPayload
 

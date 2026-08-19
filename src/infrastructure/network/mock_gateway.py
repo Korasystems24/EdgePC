@@ -20,7 +20,7 @@ class MockNetworkGateway(NetworkGateway):
         logger.info(
             "Mock: 'отправлено' {} пакетов, первый ts={}",
             len(packets),
-            packets[0].ts,
+            packets[0].ts if packets else None,
         )
 
     async def send_events(self, events: list[EdgeEvent]) -> None:
@@ -28,7 +28,7 @@ class MockNetworkGateway(NetworkGateway):
         logger.info(
             "Mock: 'отправлено' {} событий, первый type={}",
             len(events),
-            events[0].type,
+            events[0].type if events else None,
         )
 
     async def send_health(self, snapshot: HealthSnapshot) -> None:
@@ -41,5 +41,5 @@ class MockNetworkGateway(NetworkGateway):
 
     async def _simulate(self) -> None:
         await asyncio.sleep(self.delay)
-        if random.random() <= self.fail:
+        if random.random() < self.fail:
             raise NetworkUnavailable("Mock: симулированный обрыв сети")

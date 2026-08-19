@@ -1,17 +1,6 @@
 from enum import StrEnum
 
 
-class RadarSourceType(StrEnum):
-    MOCK = "mock"
-    MODBUS = "modbus"
-    WCF = "wcf"
-
-
-class NetworkGatewayType(StrEnum):
-    MOCK = "mock"
-    HTTP = "http"
-
-
 class EdgeEventType(StrEnum):
     RADAR_DOWN = "radar_down"
     RADAR_RECOVERED = "radar_recovered"
@@ -20,14 +9,10 @@ class EdgeEventType(StrEnum):
     FATAL_ERROR = "fatal_error"
 
 
-class WatchdogAction(StrEnum):
-    KEEP = "keep"
-    RESTART = "restart"
-    LEAVE_STOPPED = "leave_stopped"
-    EXIT = "exit"
-
-
 class BeamStatus(StrEnum):
+    """Значения совпадают со строками WCF: они уже лежат в JSON-колонке beams,
+    поэтому переименование сломает чтение сохранённых пакетов."""
+
     FAULT = "Fault"
     LENGTH_SIMULATED = "LengthSimulated"
     HEIGHT_SIMULATED = "HeightSimulated"

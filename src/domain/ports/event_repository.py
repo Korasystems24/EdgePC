@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
 
 from src.domain.entities.edge_event import EdgeEvent
 
@@ -11,7 +10,6 @@ class StoredEvent:
 
     id: int
     event: EdgeEvent
-    created_at: datetime
 
 
 class EventRepository(ABC):

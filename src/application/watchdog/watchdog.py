@@ -7,12 +7,11 @@ from loguru import logger
 
 from src.application.health_store import HealthStore
 from src.application.wait import sleep_until_event
-from src.application.watchdog.policy import decide
+from src.application.watchdog.policy import WatchdogAction, decide
 from src.application.worker_manager import WorkerManager
 from src.config.settings import WatchdogSettings
 from src.domain.entities.edge_event import EdgeEvent
 from src.domain.entities.health_snapshot import HealthSnapshot
-from src.domain.enum import WatchdogAction
 from src.domain.exceptions import (
     ProcessMustExit,
     StorageError,
@@ -25,6 +24,15 @@ from src.domain.ports.telemetry_repository import TelemetryRepository
 
 
 class Watchdog:
+    """Наблюдает за воркерами и эскалирует то, что они не могут решить сами.
+
+    Намеренно не `TickWorker`: его собственный отказ никто не перезапускает —
+    он поднимается до процесса через `ProcessMustExit`, а за живостью цикла
+    следит внешний supervisor. Поэтому у него свой минимальный цикл без учёта
+    сбоев и heartbeat. Правило конструкции: внутри тика нет сетевых вызовов,
+    только чтение состояния и запись в локальную БД.
+    """
+
     def __init__(
         self,
         manager: WorkerManager,
@@ -143,9 +151,10 @@ class Watchdog:
             raise ProcessMustExit(str(exc)) from exc
         await self._record_event(EdgeEvent.worker_restarted(worker=name))
         if self._too_many_restarts(name):
+            window = self._settings.restart_window_seconds
             reason = (
                 f"слишком много рестартов "
-                f"({len(self._restarts[name])} за {self._settings.restart_window_seconds}с)"
+                f"({len(self._restarts[name])} за {window}с)"
             )
             await self._record_event(
                 EdgeEvent.fatal_error(

@@ -11,16 +11,25 @@ dependencies = [
     "psutil>=7.2.2",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.2",
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
     "requests>=2.34.2",
     "sqlalchemy[asyncio]>=2.0.51",
     "tenacity>=9.1.4",
     "zeep>=4.3.3",
 ]
 
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
-pythonpath = ["."]
+[dependency-groups]
+dev = [
+    "basedpyright>=1.32.1",
+    "ruff>=0.16.3",
+    "types-psutil>=7.2.2.20260518",
+]
 
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# Комментарии и сообщения на русском: похожие на латиницу буквы — это норма.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+# Секцию [tool.pyright] читают и basedpyright, и Pylance.
+[tool.pyright]
+typeCheckingMode = "strict"
+include = ["src", "main.py"]

@@ -3,8 +3,7 @@ import time
 
 from loguru import logger
 
-from src.application.ports.worker import TaskState, Worker
-from src.application.types import WorkerFactory
+from src.application.ports.worker import TaskState, Worker, WorkerFactory
 from src.domain.exceptions import WorkerAlreadyRunning, WorkerRestartStuck
 from src.domain.value_objects.worker_health import WorkerHealth
 
@@ -14,7 +13,7 @@ class WorkerManager:
         self,
         factories: dict[str, WorkerFactory],
         *,
-        restart_join_timeout: float = 5.0,
+        restart_join_timeout: float,
     ) -> None:
         self._factories = factories
         self._workers: dict[str, Worker] = {}

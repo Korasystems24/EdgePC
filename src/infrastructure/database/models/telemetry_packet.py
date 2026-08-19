@@ -5,11 +5,12 @@ from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infrastructure.database.models.base import Base
-from src.infrastructure.database.models.mixin.event_id import EventIdMixin
-from src.infrastructure.database.models.mixin.sent_at import SentAtMixin
+from src.infrastructure.database.models.mixins import (
+    EventIdMixin,
+    IntIdPkMixin,
+    SentAtMixin,
+)
 from src.infrastructure.database.types import UTCDateTime
-
-from .mixin.int_id_pk import IntIdPkMixin
 
 
 class TelemetryPacketModel(
@@ -27,9 +28,10 @@ class TelemetryPacketModel(
         index=True,
     )
 
-    avg_level: Mapped[float | None]
-    mass: Mapped[float | None]
-    volume: Mapped[float | None]
+    # Радар может не отдать величину: в БД это NULL, а не ноль.
+    avg_level: Mapped[float | None] = mapped_column(nullable=True)
+    mass: Mapped[float | None] = mapped_column(nullable=True)
+    volume: Mapped[float | None] = mapped_column(nullable=True)
 
     beams: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
 

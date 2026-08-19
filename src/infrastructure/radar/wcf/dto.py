@@ -3,7 +3,7 @@ from typing import Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from src.domain.enum import BeamStatus
+from src.domain.enums import BeamStatus
 from src.infrastructure.radar.wcf.exceptions import ValueRadarError
 
 

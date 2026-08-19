@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from src.domain.entities.telemetry_packet import TelemetryPacket
-from src.domain.enum import BeamStatus
+from src.domain.enums import BeamStatus
 from src.domain.value_objects.beam import Beam
 from src.infrastructure.radar.wcf.dto import WCFBeamDTO, WCFDataDTO, WCFVesselDTO
 
@@ -12,14 +12,11 @@ class RadarMapper:
             ts=datetime.now(UTC),
             avg_level=vessel.average_level,
             mass=tank_data.mass,
-            volume=None,  # TODO: уточнить формулу расчёта объёма
+            # TODO: объём. Не подтверждено, приходит ли поле от WCF и в каких
+            # единицах, поэтому пока None вместо догадки.
+            volume=None,
             beams=self._map_beams(vessel),
         )
-
-    @staticmethod
-    def _calculate_volume(tank_data: WCFDataDTO) -> float | None:
-        volume = tank_data.volume / 100 if tank_data.volume is not None else None
-        return volume
 
     @staticmethod
     def _map_beams(vessel: WCFVesselDTO) -> list[Beam]:
