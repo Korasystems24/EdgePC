@@ -1,5 +1,13 @@
-from src.domain.enum import WatchdogAction
+from enum import StrEnum
+
 from src.domain.value_objects.fatal_error import FatalError
+
+
+class WatchdogAction(StrEnum):
+    KEEP = "keep"
+    RESTART = "restart"
+    LEAVE_STOPPED = "leave_stopped"
+    EXIT = "exit"
 
 
 def decide(

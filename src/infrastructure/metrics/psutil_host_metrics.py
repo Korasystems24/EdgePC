@@ -9,7 +9,8 @@ from src.domain.ports.host_metrics import HostMetrics, HostResourceSample
 class PsutilHostMetrics(HostMetrics):
     def __init__(self, disk_path: str | Path) -> None:
         self._disk_path = str(disk_path)
-        # Первый вызов с interval=None всегда 0.0 — прогрев, чтобы sample() был осмысленным.
+        # Первый вызов с interval=None всегда 0.0 — прогрев, чтобы sample()
+        # вернул осмысленное значение.
         psutil.cpu_percent(interval=None)
 
     def sample(self) -> HostResourceSample:

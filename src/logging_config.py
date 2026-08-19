@@ -2,10 +2,10 @@ import sys
 
 from loguru import logger
 
-from src.config.settings import settings
+from src.config.settings import Settings
 
 
-def configure_logging() -> None:
+def configure_logging(settings: Settings) -> None:
     logger.remove()
     logger.configure(extra={"name": "core"})
     console_format = (
@@ -28,8 +28,10 @@ def configure_logging() -> None:
         "{name}:{function}:{line} "
         "[{extra[name]}] - {message}"
     )
+    log_path = settings.log.path
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     logger.add(
-        settings.log_file_path,
+        log_path,
         level="INFO",
         rotation="10 MB",
         retention="14 days",

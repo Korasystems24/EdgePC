@@ -44,25 +44,25 @@ class TelemetryStorageError(StorageError):
     """
 
 
-class NetworkSourceError(Exception):
+class NetworkError(Exception):
     """
-    Базовое исключение для проблем со всеми сетевыми данными.
+    Базовое исключение для проблем с отправкой данных наружу.
     """
 
 
-class NetworkUnavailable(NetworkSourceError):
+class NetworkUnavailable(NetworkError):
     """
     временно: сеть, timeout, 429, 5xx;
     """
 
 
-class DispatchRejected(NetworkSourceError):
+class DispatchRejected(NetworkError):
     """
     сервер отверг данные с 422;
     """
 
 
-class DispatchMisconfigured(NetworkSourceError):
+class DispatchMisconfigured(NetworkError):
     """
     неверный токен или контракт: 400, 401, 403.
     """

@@ -6,9 +6,14 @@ from pydantic_core import ValidationError
 from requests import RequestException
 from zeep.exceptions import Error as ZeepError
 
-import src.domain.exceptions
 from src.domain.entities.telemetry_packet import TelemetryPacket
-from src.domain.exceptions import RadarSourceError, RadarSourceHung
+from src.domain.exceptions import (
+    RadarDataInvalid,
+    RadarSourceError,
+    RadarSourceHung,
+    RadarSourceMisconfigured,
+    RadarSourceUnavailable,
+)
 from src.domain.ports.radar_adapter import RadarAdapter
 from src.infrastructure.radar.wcf.dto import WCFDataDTO, WCFVesselDTO
 from src.infrastructure.radar.wcf.exceptions import (
@@ -68,23 +73,23 @@ class WCFRadarAdapter(RadarAdapter):
         except FuturesCancelledError:
             raise
         except ClientNotInitialized as e:
-            raise src.domain.exceptions.RadarSourceUnavailable(str(e)) from e
+            raise RadarSourceUnavailable(str(e)) from e
         except (RequestException, ZeepError) as e:
-            raise src.domain.exceptions.RadarSourceUnavailable(
+            raise RadarSourceUnavailable(
                 f"WCF недоступен: {e}"
             ) from e
         except RadarCatalogNotReady as e:
-            raise src.domain.exceptions.RadarSourceUnavailable(str(e)) from e
+            raise RadarSourceUnavailable(str(e)) from e
         except RadarSelectionError as e:
-            raise src.domain.exceptions.RadarSourceMisconfigured(str(e)) from e
+            raise RadarSourceMisconfigured(str(e)) from e
         except (ValidationError, ValueRadarError) as e:
-            raise src.domain.exceptions.RadarDataInvalid(
+            raise RadarDataInvalid(
                 f"Некорректные данные от WCF: {e}"
             ) from e
         except RadarSourceError:
             raise
         except Exception as e:
-            raise src.domain.exceptions.RadarSourceUnavailable(
+            raise RadarSourceUnavailable(
                 f"неожиданная ошибка источника: {e}"
             ) from e
 

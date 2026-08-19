@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -33,3 +34,8 @@ class Worker(Protocol):
     def storage_paused(self) -> bool: ...
 
     def is_alive(self, max_silence: float | None = None) -> bool: ...
+
+
+type WorkerFactory = Callable[[], Worker]
+"""Рестарт создаёт новый экземпляр воркера, а не запускает остановленный
+повторно, поэтому менеджер хранит фабрики, а не сами объекты."""

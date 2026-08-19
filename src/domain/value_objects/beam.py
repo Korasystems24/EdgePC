@@ -2,7 +2,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.domain.enum import BeamStatus
+from src.domain.enums import BeamStatus
 
 
 class Beam(BaseModel):

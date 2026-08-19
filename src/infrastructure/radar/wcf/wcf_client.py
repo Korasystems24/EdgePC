@@ -4,7 +4,7 @@ import requests
 from zeep import Client, Transport
 
 from .exceptions import ClientNotInitialized
-from .types import WCFServiceProtocol, ZeepClientProtocol
+from .types import WCFServiceProtocol
 
 
 class WCFClient:
@@ -13,7 +13,6 @@ class WCFClient:
         wsdl_url: str | None,
         timeout: int,
     ) -> None:
-
         self.wsdl_url = wsdl_url
         self._client: Client | None = None
 
@@ -40,14 +39,12 @@ class WCFClient:
         return self._client is not None
 
     @property
-    def client(self) -> ZeepClientProtocol:
+    def service(self) -> WCFServiceProtocol:
+        """zeep собирает методы сервиса из WSDL в рантайме, поэтому статически
+        они выглядят как `Any`: протокол объявляет то, чем мы пользуемся."""
         if self._client is None:
             raise ClientNotInitialized("WCF клиент не инициализирован")
-        return cast(ZeepClientProtocol, self._client)
-
-    @property
-    def service(self) -> WCFServiceProtocol:
-        return self.client.service
+        return cast(WCFServiceProtocol, self._client.service)
 
     def get_park_names(self) -> list[str]:
         response = self.service.GetParkNames()
@@ -63,6 +60,3 @@ class WCFClient:
     def get_data(self) -> str:
         response = self.service.GetData()
         return response or ""
-
-    def get_wsdl_info(self) -> None:
-        return self.client.wsdl.dump()

@@ -1,16 +1,10 @@
 from typing import Protocol
 
-from zeep.wsdl import Document
-
 
 class WCFServiceProtocol(Protocol):
+    """Методы WSDL, которыми пользуется клиент. Имена — как в самом WCF."""
+
     def GetParkNames(self) -> list[str]: ...
     def GetVesselNames(self, park_name: str) -> list[str]: ...
     def GetVessel(self, park_name: str, vessel_name: str) -> object: ...
     def GetData(self) -> str: ...
-    def GetBeamStatus(self, vessel_name: str) -> list[object]: ...
-
-
-class ZeepClientProtocol(Protocol):
-    wsdl: Document
-    service: WCFServiceProtocol

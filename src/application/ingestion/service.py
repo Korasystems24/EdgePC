@@ -13,6 +13,7 @@ class IngestionService:
     ) -> None:
         self._radar_adapter = radar_adapter
         self._repository = repository
+        self._log = logger.bind(name="ingestion")
 
     def raise_if_hung(self) -> None:
         self._radar_adapter.raise_if_hung()
@@ -20,7 +21,7 @@ class IngestionService:
     async def collect_once(self) -> TelemetryPacket:
         packet = await self._radar_adapter.read_packet()
         await self._repository.save(packet)
-        logger.bind(name="ingestion service: collect_once").info(
+        self._log.info(
             "Собран и сохранён пакет: avg_level={} mass={} beams={}",
             packet.avg_level,
             packet.mass,

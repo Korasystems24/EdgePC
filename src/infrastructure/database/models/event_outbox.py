@@ -5,10 +5,12 @@ from sqlalchemy import JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.infrastructure.database.models.base import Base
-from src.infrastructure.database.models.mixin.created_at import CreatedAtMixin
-from src.infrastructure.database.models.mixin.event_id import EventIdMixin
-from src.infrastructure.database.models.mixin.int_id_pk import IntIdPkMixin
-from src.infrastructure.database.models.mixin.sent_at import SentAtMixin
+from src.infrastructure.database.models.mixins import (
+    CreatedAtMixin,
+    EventIdMixin,
+    IntIdPkMixin,
+    SentAtMixin,
+)
 from src.infrastructure.database.types import UTCDateTime
 
 

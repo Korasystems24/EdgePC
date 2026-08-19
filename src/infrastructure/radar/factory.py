@@ -1,5 +1,5 @@
+from src.config.enums import RadarSourceType
 from src.config.settings import MockIOSettings, WcfSettings
-from src.domain.enum import RadarSourceType
 from src.domain.exceptions import RadarSourceMisconfigured
 from src.domain.ports.radar_adapter import RadarAdapter
 from src.infrastructure.radar.mock_adapter import MockRadarAdapter
