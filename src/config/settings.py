@@ -118,22 +118,47 @@ class DispatchSettings(BaseModel):
 
     interval: float = Field(default=10.0, gt=0)
     tick_deadline: float = Field(default=45.0, gt=0)
-    batch_size: int = 200
+    batch_size: int = 50
+    """Пачка телеметрии за тик. Ограничение не в нашей скорости, а в размере
+    тела запроса: пакет с 64 лучами весит 4–6 КиБ, поэтому 50 пакетов дают
+    ~250 КиБ и с запасом влезают в дефолтный лимит nginx (1 МиБ), а 200 дают
+    мегабайт и упираются в него. Даже с 50 отправка вывозит 18 000 пакетов в
+    час против 720 набираемых, так что запас по скорости 25-кратный."""
+
     event_batch_size: int = 50
     retention_ttl: timedelta = timedelta(days=7)
     retention_interval: timedelta = timedelta(hours=1)
     retention_timeout: float = Field(default=5.0, gt=0)
     quarantine_after_attempts: int = 3
-    mass_rejection_sample: int = 10
+
+    mass_rejection_sample: int = 4
+    """Сколько пакетов 422-изоляция проверяет по одному. Выборка обязана
+    укладываться в `isolation_budget`, иначе проверка не доходит до конца и
+    правило «сервер отверг всё подряд — сломан контракт» не срабатывает
+    никогда: 4 × http_timeout (5 с) = 20 с против бюджета 22 с."""
 
     http: HttpTransportSettings = Field(default_factory=HttpTransportSettings)
 
     @property
-    def events_send_timeout(self) -> float:
-        """Сколько тика можно отдать событиям, чтобы телеметрия успела уйти."""
+    def _tick_remainder(self) -> float:
+        """Хвост тика после health и одной отправки с ретраями. Положителен по
+        построению: check_dispatch_budgets_fit_tick требует, чтобы в дедлайн
+        влезли health и две такие отправки."""
         return (
             self.tick_deadline - self.http.http_timeout - self.http.retrying_send_budget
         )
+
+    @property
+    def events_send_timeout(self) -> float:
+        """Сколько тика можно отдать событиям, чтобы телеметрия успела уйти."""
+        return self._tick_remainder
+
+    @property
+    def isolation_budget(self) -> float:
+        """Сколько тика достаётся 422-изоляции. Тот же хвост, что и событиям:
+        изоляция идёт вместо обычной отправки телеметрии и должна оставить время
+        на запись накопленных отказов до дедлайна тика."""
+        return self._tick_remainder
 
     @property
     def heartbeat_budget(self) -> float:
@@ -147,6 +172,11 @@ class DispatchSettings(BaseModel):
             tick_deadline=self.tick_deadline,
             http_timeout=self.http.http_timeout,
             retrying_send_budget=self.http.retrying_send_budget,
+        )
+        timing.check_isolation_sample_fits_budget(
+            mass_rejection_sample=self.mass_rejection_sample,
+            http_timeout=self.http.http_timeout,
+            isolation_budget=self.isolation_budget,
         )
         return self
 

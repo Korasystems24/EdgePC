@@ -125,10 +125,10 @@ class HttpGateway(NetworkGateway):
                 json=payload,
                 headers=self._headers(),
             )
+        except (httpx.InvalidURL, httpx.UnsupportedProtocol) as exc:
+            raise DispatchMisconfigured(f"{type(exc).__name__}: {exc}") from exc
         except httpx.RequestError as exc:
             raise NetworkUnavailable(f"{type(exc).__name__}: {exc}") from exc
-        except httpx.InvalidURL as exc:
-            raise DispatchMisconfigured(f"{type(exc).__name__}: {exc}") from exc
 
         self._raise_from_status(response)
 
@@ -145,6 +145,15 @@ class HttpGateway(NetworkGateway):
         if status == HTTPStatus.UNPROCESSABLE_ENTITY:
             logger.error("Сервер отверг данные (HTTP 422): {}", body)
             raise DispatchRejected(f"HTTP {status}: {body}")
+
+        if status == HTTPStatus.REQUEST_ENTITY_TOO_LARGE:
+            logger.error(
+                "Приёмник считает тело запроса слишком большим (HTTP 413): {}. "
+                "Повтор тем же размером не поможет: уменьшить "
+                "DISPATCH__BATCH_SIZE или поднять лимит тела на прокси",
+                body,
+            )
+            raise DispatchMisconfigured(f"HTTP {status}: {body}")
 
         if status in MISCONFIGURED_STATUSES:
             logger.error(

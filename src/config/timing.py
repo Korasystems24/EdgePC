@@ -55,6 +55,22 @@ def check_dispatch_budgets_fit_tick(
         )
 
 
+def check_isolation_sample_fits_budget(
+    *, mass_rejection_sample: int, http_timeout: float, isolation_budget: float
+) -> None:
+    """422-изоляция шлёт выборку по одному пакету без ретраев. Если выборка не
+    успевает пройти целиком, правило «сервер отверг всё подряд — сломан
+    контракт» не проверяется никогда, и отказы копят попытки до карантина без
+    этой защиты."""
+    budget = mass_rejection_sample * http_timeout
+    if budget > isolation_budget:
+        raise ValueError(
+            f"выборка 422-изоляции ({mass_rejection_sample} * http_timeout "
+            f"{http_timeout} = {budget}) должна быть <= бюджета изоляции "
+            f"({isolation_budget})"
+        )
+
+
 def check_heartbeat_covers_ticks(
     *,
     heartbeat_max_silence: float,
