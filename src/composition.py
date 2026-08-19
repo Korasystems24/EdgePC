@@ -55,6 +55,7 @@ def build_worker_manager(
         retention_ttl=app_settings.dispatch.retention_ttl,
         mass_rejection_sample=app_settings.dispatch.mass_rejection_sample,
         quarantine_after_attempts=app_settings.dispatch.quarantine_after_attempts,
+        isolation_budget=app_settings.dispatch.isolation_budget,
         events_timeout=app_settings.dispatch.events_send_timeout,
     )
 

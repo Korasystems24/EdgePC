@@ -35,6 +35,7 @@ class DispatchService:
         retention_ttl: timedelta,
         mass_rejection_sample: int,
         quarantine_after_attempts: int,
+        isolation_budget: float,
         events_timeout: float | None = None,
     ) -> None:
         self._repository = repository
@@ -50,6 +51,7 @@ class DispatchService:
             gateway,
             sample_size=mass_rejection_sample,
             quarantine_after_attempts=quarantine_after_attempts,
+            budget=isolation_budget,
         )
         self._log = logger.bind(name="dispatch")
 
