@@ -7,6 +7,7 @@ from loguru import logger
 
 from src.application.dispatch.service import DispatchService
 from src.application.dispatch.worker import DispatchWorker
+from src.application.guard.guard import EventLoopGuard
 from src.application.health_store import HealthStore
 from src.application.ingestion.service import IngestionService
 from src.application.ingestion.worker import IngestionWorker
@@ -122,6 +123,12 @@ def _remove_stop_signals() -> None:
         loop.remove_signal_handler(sig)
 
 
+def _build_event_loop_guard():
+    loop = asyncio.get_running_loop()
+    guard = EventLoopGuard(loop, threshold_s=3.0, check_interval_s=0.5)
+    return guard
+
+
 async def shutdown_runtime(
     watchdog: Watchdog | None,
     watchdog_task: asyncio.Task[None] | None,
@@ -141,9 +148,7 @@ async def shutdown_runtime(
             watchdog.stop()
         if watchdog_task is not None and not watchdog_task.done():
             remaining = max(0.0, deadline - time.monotonic())
-            _done, pending = await asyncio.wait(
-                {watchdog_task}, timeout=remaining
-            )
+            _done, pending = await asyncio.wait({watchdog_task}, timeout=remaining)
             if pending:
                 watchdog_task.cancel()
                 await asyncio.gather(watchdog_task, return_exceptions=True)
@@ -215,7 +220,12 @@ async def bootstrap_application(app_settings: Settings = settings) -> None:
     manager: WorkerManager | None = None
     watchdog: Watchdog | None = None
     watchdog_task: asyncio.Task[None] | None = None
+    guard: EventLoopGuard | None = None
     try:
+        guard = _build_event_loop_guard()
+        guard.start()
+        log.info("Запущен event loop guard")
+
         db_client = SqliteClient(url=app_settings.db.url)
         radar_adapter = create_radar_adapter(
             app_settings.radar_source,
@@ -237,6 +247,7 @@ async def bootstrap_application(app_settings: Settings = settings) -> None:
         storage_monitor = FilesystemStorageMonitor(path=app_settings.db.dir)
         health_store = HealthStore()
         host_metrics = PsutilHostMetrics(app_settings.db.dir)
+
         manager = _build_worker_manager(
             app_settings,
             gateway,
@@ -273,5 +284,7 @@ async def bootstrap_application(app_settings: Settings = settings) -> None:
                 timeout=app_settings.shutdown_timeout,
             )
         finally:
+            if guard is not None:
+                guard.stop()
             _remove_stop_signals()
             _exit_if_source_hung(radar_adapter)
