@@ -7,6 +7,7 @@ from pathlib import Path
 from sqlite3 import Connection as SQLite3Connection
 from typing import TYPE_CHECKING
 
+from alembic.util.exc import CommandError
 from sqlalchemy import event, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
@@ -18,7 +19,7 @@ from sqlalchemy.pool import ConnectionPoolEntry, StaticPool
 
 from src.domain.exceptions import StorageError
 from src.infrastructure.database.base_client import DatabaseClient
-from src.infrastructure.database.models import Base
+from src.infrastructure.database.migrations import upgrade_schema
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -98,10 +99,14 @@ class SqliteClient(DatabaseClient):
 
     async def init_database(self) -> None:
         try:
-            async with self.engine.begin() as conn:
+            async with self.engine.connect() as conn:
                 await conn.execute(text("PRAGMA journal_mode=WAL;"))
-                await conn.run_sync(Base.metadata.create_all)
-        except SQLAlchemyError as e:
+                await conn.commit()
+            # begin() коммитит alembic_version: у SQLite DDL живёт вне транзакции,
+            # и без commit SQLAlchemy 2 откатывает только строку версии.
+            async with self.engine.begin() as conn:
+                await conn.run_sync(upgrade_schema)
+        except (SQLAlchemyError, CommandError) as e:
             raise StorageError(f"Не удалось инициализировать SQLite: {e}") from e
 
     @asynccontextmanager
