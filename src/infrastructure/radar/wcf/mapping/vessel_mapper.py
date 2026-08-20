@@ -12,9 +12,7 @@ class RadarMapper:
             ts=datetime.now(UTC),
             avg_level=vessel.average_level,
             mass=tank_data.mass,
-            # TODO: объём. Не подтверждено, приходит ли поле от WCF и в каких
-            # единицах, поэтому пока None вместо догадки.
-            volume=None,
+            volume=tank_data.volume,
             beams=self._map_beams(vessel),
         )
 

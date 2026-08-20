@@ -35,9 +35,9 @@ class WCFDataDTO(NonFiniteRejectingModel):
     density: float | None = Field(default=None, alias="Density")
     height: float | None = Field(default=None, alias="height")
     diameter: float | None = Field(default=None, alias="diameter")
-    volume: float | None = Field(
-        default=None, alias="volume"
-    )  # TODO: подтвердить, что ключ реально приходит
+    # GetData: v в м³. Сходится с mass и Density (10.044 т / 0.9 т/м³ = 11.16).
+    # out_volume в том же дампе — другое число (~1121), в пакет не берём.
+    volume: float | None = Field(default=None, alias="v")
 
     @classmethod
     def from_raw(cls, raw_data: str) -> Self:
