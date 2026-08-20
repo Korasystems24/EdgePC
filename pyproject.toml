@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "aiosqlite>=0.22.1",
+    "alembic>=1.19.1",
     "httpx>=0.28.1",
     "loguru>=0.7.3",
     "psutil>=7.2.2",
@@ -28,6 +29,10 @@ dev = [
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 # Комментарии и сообщения на русском: похожие на латиницу буквы — это норма.
 ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.isort]
+# Каталог alembic/ иначе считается first-party и ломает группировку импортов.
+known-third-party = ["alembic"]
 
 # Секцию [tool.pyright] читают и basedpyright, и Pylance.
 [tool.pyright]
