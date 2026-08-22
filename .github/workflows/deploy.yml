@@ -35,7 +35,7 @@ jobs:
             throw "EDGEPC_DIR=$($env:EDGEPC_DIR) is not a git clone"
           }
           if (-not (Test-Path (Join-Path $env:EDGEPC_DIR '.env'))) {
-            throw "Missing $($env:EDGEPC_DIR)\.env — copy .env.example and fill it in"
+            throw "Missing app .env in $($env:EDGEPC_DIR) - copy .env.example"
           }
 
           Set-Location $env:EDGEPC_DIR

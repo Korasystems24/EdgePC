@@ -5,7 +5,7 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
 if (-not (Test-Path '.env')) {
-    throw "Missing $root\.env — copy .env.example and fill it in"
+    throw "Missing $root\.env - copy .env.example and fill it in"
 }
 
 function Assert-Exit([string]$Name) {

@@ -7,7 +7,7 @@
 #   .\scripts\install-github-runner.ps1 -Token <registration-token>
 #
 # Token: repo → Settings → Actions → Runners → New self-hosted runner (Windows).
-# Optional: -RunnerDir C:\actions-runner  -RunnerName bunker-1  -LogonPassword '...'
+# Optional: -RunnerDir C:\actions-runner  -RunnerName bunker-1
 
 [CmdletBinding()]
 param(
@@ -18,9 +18,7 @@ param(
 
     [string]$RunnerName = $env:COMPUTERNAME,
 
-    [string]$RunnerLabels = 'edgepc',
-
-    [string]$LogonPassword
+    [string]$RunnerLabels = 'edgepc'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -81,53 +79,52 @@ if (-not (Test-Path '.\config.cmd')) {
     Remove-Item $zip
 }
 
+function Write-RunnerEnv {
+    $edgepcDir = $root.Replace('\', '/')
+    $envLines = @()
+    if (Test-Path '.\.env') {
+        $envLines = @(Get-Content '.\.env' | Where-Object { $_ -notmatch '^(EDGEPC_DIR|PATH)=' })
+    }
+    $envLines += "EDGEPC_DIR=$edgepcDir"
+    $envLines += "PATH=$($env:PATH)"
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [IO.File]::WriteAllLines((Join-Path $RunnerDir '.env'), $envLines, $utf8)
+    $edgepcDir
+}
+
 if (Test-Path '.\svc.cmd') {
     & .\svc.cmd stop | Out-Null
 }
 
-$account = "$env:USERDOMAIN\$env:USERNAME"
-if (-not $LogonPassword) {
-    $secure = Read-Host "Password for $account (runner Windows service)" -AsSecureString
-    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-    try {
-        $LogonPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-    }
-    finally {
-        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-    }
-}
-
+# Do not pass --windowslogonpassword: PIN/Hello and special characters fail
+# unattended service install. Register the runner, then start it in the user
+# session so Docker Desktop is reachable.
 $configArgs = @(
     '--unattended', '--replace',
     '--url', $repoUrl,
     '--token', $Token,
     '--name', $RunnerName,
     '--labels', $RunnerLabels,
-    '--work', '_work',
-    '--runasservice',
-    '--windowslogonaccount', $account,
-    '--windowslogonpassword', $LogonPassword
+    '--work', '_work'
 )
 & .\config.cmd @configArgs
 if ($LASTEXITCODE -ne 0) {
     throw "config.cmd failed with exit $LASTEXITCODE"
 }
 
-$edgepcDir = $root.Replace('\', '/')
-$envLines = @()
-if (Test-Path '.\.env') {
-    $envLines = @(Get-Content '.\.env' | Where-Object { $_ -notmatch '^(EDGEPC_DIR|PATH)=' })
-}
-$envLines += "EDGEPC_DIR=$edgepcDir"
-$envLines += "PATH=$($env:PATH)"
-$utf8 = New-Object System.Text.UTF8Encoding $false
-[IO.File]::WriteAllLines((Join-Path $RunnerDir '.env'), $envLines, $utf8)
+$edgepcDir = Write-RunnerEnv
 
-& .\svc.cmd start
-& .\svc.cmd status
+$taskName = 'GitHubActionsRunner-EdgePC'
+Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+$action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument '/c run.cmd' -WorkingDirectory $RunnerDir
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+Start-ScheduledTask -TaskName $taskName
 
 Write-Host ""
-Write-Host "Runner $RunnerName is listening for jobs."
+Write-Host "Runner $RunnerName is registered."
 Write-Host "EDGEPC_DIR=$edgepcDir"
-Write-Host "Merge .github/workflows/deploy.yml to main, then a push will rebuild here."
-Write-Host "Docker Desktop must start at boot (same Windows user as this service)."
+Write-Host "It starts at Windows logon (task $taskName) and was started now."
+Write-Host "Keep this user logged in so Docker Desktop stays up."
