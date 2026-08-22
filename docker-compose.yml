@@ -11,6 +11,8 @@ services:
       DB__DIR: /app/data
       LOG__DIR: /app/logs
       TZ: Asia/Krasnoyarsk
+      # Заводской WSDL держит XSD/SOAP на localhost — это хост Windows.
+      WCF__LOOPBACK_ALIAS: host.docker.internal
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

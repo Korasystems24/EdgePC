@@ -1,9 +1,10 @@
 from typing import cast
 
 import requests
-from zeep import Client, Transport
+from zeep import Client
 
 from .exceptions import ClientNotInitialized
+from .loopback_transport import LoopbackRewriteTransport
 from .types import WCFServiceProtocol
 
 
@@ -12,15 +13,17 @@ class WCFClient:
         self,
         wsdl_url: str | None,
         timeout: int,
+        loopback_alias: str | None = None,
     ) -> None:
         self.wsdl_url = wsdl_url
         self._client: Client | None = None
 
         self._session = requests.Session()
-        self._transport = Transport(
+        self._transport = LoopbackRewriteTransport(
             session=self._session,
             timeout=timeout,
             operation_timeout=timeout,
+            loopback_alias=loopback_alias,
         )
 
     def close(self) -> None:

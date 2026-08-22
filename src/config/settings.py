@@ -45,6 +45,8 @@ class WcfSettings(BaseModel):
 
     wsdl_url: str | None = None
     timeout: int = Field(default=3, gt=0)
+    loopback_alias: str | None = None
+    """Хост вместо localhost/127.0.0.1 из schemaLocation и soap:address."""
 
     @model_validator(mode="after")
     def wsdl_url_not_blank(self) -> Self:

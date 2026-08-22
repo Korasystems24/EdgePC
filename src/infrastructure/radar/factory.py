@@ -24,6 +24,7 @@ def create_radar_adapter(
             client=WCFClient(
                 wsdl_url=wcf.wsdl_url,
                 timeout=wcf.timeout,
+                loopback_alias=wcf.loopback_alias,
             ),
             mapper=RadarMapper(),
         )
