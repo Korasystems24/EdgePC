@@ -1,0 +1,56 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: edgepc-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    # Публичный IP не нужен: раннер на Windows сам ходит на GitHub по HTTPS.
+    # Лейбл edgepc задаётся в scripts/install-github-runner.ps1.
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, windows, edgepc]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Pull main and restart the stack
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:EDGEPC_DIR) {
+            throw 'Set EDGEPC_DIR in the runner .env to the EdgePC clone path'
+          }
+          if (-not (Test-Path (Join-Path $env:EDGEPC_DIR '.git'))) {
+            throw "EDGEPC_DIR=$($env:EDGEPC_DIR) is not a git clone"
+          }
+          if (-not (Test-Path (Join-Path $env:EDGEPC_DIR '.env'))) {
+            throw "Missing $($env:EDGEPC_DIR)\.env — copy .env.example and fill it in"
+          }
+
+          Set-Location $env:EDGEPC_DIR
+
+          $auth = [Convert]::ToBase64String(
+            [Text.Encoding]::ASCII.GetBytes("x-access-token:$($env:GITHUB_TOKEN)")
+          )
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" `
+            fetch --force "https://github.com/$($env:GITHUB_REPOSITORY).git" `
+            "+$($env:GITHUB_SHA):refs/remotes/origin/main"
+          if ($LASTEXITCODE -ne 0) { throw "git fetch failed with exit $LASTEXITCODE" }
+
+          git checkout --force -B main origin/main
+          if ($LASTEXITCODE -ne 0) { throw "git checkout failed with exit $LASTEXITCODE" }
+          git log -1 --oneline
+
+          & .\scripts\deploy.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
